@@ -93,4 +93,15 @@ risk_score = min(100,
 
 ---
 
+## Companion Documents
+
+| Document | Description |
+|----------|-------------|
+| [SPEC.md](SPEC.md) | Primary specification — orchestration, gates, retry policies, HITL, CI/CD, security, deployment guide |
+| [hats/AGENTIC_AI_HATS_TEAM_STACK.md](hats/AGENTIC_AI_HATS_TEAM_STACK.md) | Complete standalone specification (Sections 1–16) with inline hat details |
+| [hats/HATS_TEAM_IMPLEMENTATION_GUIDE.md](hats/HATS_TEAM_IMPLEMENTATION_GUIDE.md) | Appendix E — Implementation guide: Ollama Cloud + n8n deployment |
+| [hats/HATS_TEAM_CONCERNS_DISCUSSION.md](hats/HATS_TEAM_CONCERNS_DISCUSSION.md) | Appendix F — Addressing concerns: honest engagement with real-world skepticism |
+
+---
+
 Back to [README](README.md) · Full spec: [SPEC.md](SPEC.md)
