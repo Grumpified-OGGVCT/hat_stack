@@ -1,0 +1,119 @@
+# 🎩 Hats Self-Review
+#
+# Runs the Hats pipeline on PRs to this repository itself.
+# Demonstrates the system reviewing its own changes.
+
+name: "🎩 Self-Review"
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  self-review:
+    name: "🎩 Hat Stack Self-Review"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate diff
+        id: diff
+        shell: bash
+        run: |
+          git diff origin/${{ github.base_ref }}...HEAD > /tmp/pr-diff.patch
+          echo "diff_file=/tmp/pr-diff.patch" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r scripts/requirements.txt
+
+      - name: Run Hats Pipeline
+        id: hats
+        env:
+          OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
+          OLLAMA_BASE_URL: ${{ secrets.OLLAMA_BASE_URL || 'https://api.ollama.ai/v1' }}
+        shell: bash
+        run: |
+          set +e
+          python scripts/hats_runner.py \
+            --diff /tmp/pr-diff.patch \
+            --config scripts/hat_configs.yml \
+            --output both \
+            --markdown-file /tmp/hats-report.md \
+            --json-file /tmp/hats-report.json \
+            --context "Self-review of hat_stack PR #${{ github.event.pull_request.number }}: ${{ github.event.pull_request.title }}"
+          EXIT_CODE=$?
+          set -e
+
+          if [ -f /tmp/hats-report.json ]; then
+            VERDICT=$(python3 -c "import json; print(json.load(open('/tmp/hats-report.json'))['verdict'])")
+            RISK_SCORE=$(python3 -c "import json; print(json.load(open('/tmp/hats-report.json'))['risk_score'])")
+          else
+            VERDICT="ALLOW"
+            RISK_SCORE="0"
+          fi
+
+          echo "verdict=$VERDICT" >> "$GITHUB_OUTPUT"
+          echo "risk_score=$RISK_SCORE" >> "$GITHUB_OUTPUT"
+
+      - name: Post review to PR
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let body = '🎩 Hats Review completed.\n\nVerdict: ${{ steps.hats.outputs.verdict }} (Score: ${{ steps.hats.outputs.risk_score }})';
+            try {
+              body = fs.readFileSync('/tmp/hats-report.md', 'utf8');
+            } catch (e) {
+              // Use default body
+            }
+
+            // Find and update existing comment, or create new one
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComment = comments.find(c =>
+              c.body.includes('🎩 Hats Team Review Report')
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body,
+              });
+            }
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hats-self-review-report
+          path: |
+            /tmp/hats-report.md
+            /tmp/hats-report.json
+          retention-days: 30
