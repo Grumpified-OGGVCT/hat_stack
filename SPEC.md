@@ -10,7 +10,7 @@
 1. [Executive Summary](#1-executive-summary)
 2. [Design Philosophy & Principles](#2-design-philosophy--principles)
 3. [Technology Landscape (2025–2026)](#3-technology-landscape-20252026)
-4. [The Hats Team — Master Hat Registry](#4-the-hats-team--master-hat-registry)
+4. [The Hats Team — Complete Role Catalog](#4-the-hats-team--complete-role-catalog)
 5. [Persona Definitions & Expertise Matrix](#5-persona-definitions--expertise-matrix)
 6. [Orchestration Architecture — The Conductor](#6-orchestration-architecture--the-conductor)
 7. [Gate System — Quality, Cost, Security & Flow Control](#7-gate-system--quality-cost-security--flow-control)
@@ -124,7 +124,7 @@ The stack is grounded in the **2025–2026 agentic AI ecosystem**, incorporating
 
 ---
 
-## 4. The Hats Team — Master Hat Registry
+## 4. The Hats Team — Complete Role Catalog
 
 | # | Emoji | Hat Name | Run Mode | Trigger Conditions | Primary Focus |
 |---|-------|----------|----------|--------------------|---------------|
@@ -1116,40 +1116,32 @@ When the cost budget gate limits the number of hats that can run, use this prior
 1. ⚫ Black (security — non-negotiable)
 2. 🟪 Purple (AI safety — non-negotiable)
 3. 🔵 Blue (process — non-negotiable)
-4. 🔗 Steel (supply chain — high regulatory value, low cost)
-5. 🔴 Red (resilience — high production impact)
-6. 🟤 Brown (data privacy — regulatory risk)
-7. ⚙️ Gray (observability — operational risk)
-8. 🟠 Orange (DevOps — deployment risk)
-9. ⚪ White (efficiency — cost optimization)
-10. 🧪 Chartreuse (testing — quality)
-11. 🟡 Yellow (integration — cross-component)
-12. 🟢 Green (evolution — future-proofing)
-13. 🟣 Indigo (architecture — macro-level)
-14. 🪨 Silver (token optimization — AI-specific)
-15. 💎 Azure (protocol — AI-specific)
-16. ♿ Teal (accessibility — user experience)
-17. 🩵 Cyan (innovation — experimental)
-18. ✨ Gold/CoVE (always runs last — non-negotiable)
+4. 🔗 Steel (supply chain — fast and cheap)
+5. ⚪ White (efficiency & resources — fast and cheap)
+6. 🧪 Chartreuse (testing quality)
+7. 🔴 Red (resilience)
+8. ⚙️ Gray (observability)
+9. 🟤 Brown (data governance)
+10. 🟠 Orange (DevOps)
+11. 🪨 Silver (token optimization)
+12. 💎 Azure (protocol integration)
+13. 🟡 Yellow (synergies)
+14. 🟢 Green (evolution)
+15. 🟣 Indigo (cross-feature architecture)
+16. ♿ Teal (accessibility)
+17. 🩵 Cyan (innovation)
+18. ✨ Gold/CoVE (always runs last, uses consolidated reports)
 
-### Appendix C: Composite Risk Score Formula
+### Appendix C: Model Selection Matrix
 
-The Gold Hat (CoVE) computes a composite risk score (0–100) from all hat findings:
+| Hat Tier | Claude Opus 4 | Claude Sonnet 4 | GPT-4o | GPT-4o-mini | Gemini 2.5 Pro | Gemini Flash |
+|----------|:---:|:---:|:---:|:---:|:---:|:---:|
+| Tier 1 (Security/Safety/Adjudication) | ✅ | | ✅ | | ✅ | |
+| Tier 2 (Architecture/Innovation) | ✅ | ✅ | ✅ | | ✅ | |
+| Tier 3 (Quality/Analysis) | | ✅ | ✅ | | | ✅ |
+| Tier 4 (Fast/Scanning) | | | | ✅ | | ✅ |
 
-```
-risk_score = min(100,
-  min(80, CRITICAL_count × 20) +
-  min(40, HIGH_count × 5) +
-  min(10, MEDIUM_count × 1) +
-  min(5, LOW_count × 0.1)
-)
-```
-
-**Verdict thresholds:**
-- Score 0–20: **ALLOW** (auto-approved)
-- Score 21–60: **ESCALATE** (human review required)
-- Score 61–100: **QUARANTINE** (hard block)
-- Any CRITICAL finding: **QUARANTINE** regardless of score
+**Cost Optimization Tip:** Hats in Tier 4 (Blue, Silver, Teal, Steel) should almost always use the cheapest available model. Their analysis is largely pattern-based and deterministic — a premium model adds cost without proportional quality improvement.
 
 ### Appendix D: Recommended LLM Backend Summary
 
@@ -1174,6 +1166,56 @@ risk_score = min(100,
 | 🧪 Chartreuse | Claude Sonnet 4 | Test-design reasoning |
 | ✨ Gold/CoVE | Claude Opus 4 | Final adjudication — non-negotiable highest capability |
 
+### Appendix E: Composite Risk Score Formula
+
+The Gold Hat (CoVE) computes a composite risk score (0–100) from all hat findings:
+
+```
+risk_score = min(100,
+  min(80, CRITICAL_count × 20) +
+  min(40, HIGH_count × 5) +
+  min(10, MEDIUM_count × 1) +
+  min(5, LOW_count × 0.1)
+)
+```
+
+**Verdict thresholds:**
+- Score 0–20: **ALLOW** (auto-approved)
+- Score 21–60: **ESCALATE** (human review required)
+- Score 61–100: **QUARANTINE** (hard block)
+- Any Gold Hat-confirmed/adjudicated **CRITICAL** finding: **QUARANTINE** regardless of score
+
+### Appendix F: Glossary
+
+| Term | Definition |
+|------|-----------|
+| **MCP** | Model Context Protocol — Anthropic's standard for agent-to-tool integration |
+| **A2A** | Agent-to-Agent Protocol — Google's standard for inter-agent communication |
+| **CoVE** | Convergent Verification & Expert — the Gold Hat's adversarial QA methodology |
+| **HITL** | Human-in-the-Loop — human oversight and approval checkpoints |
+| **Gate** | A flow-control mechanism that can pause, block, or redirect the pipeline |
+| **Circuit Breaker** | A fault-tolerance pattern that prevents cascading failures |
+| **Backpressure** | Flow-control mechanism that prevents overload by throttling input |
+| **SBOM** | Software Bill of Materials — a complete inventory of software components |
+| **PIA** | Privacy Impact Assessment — evaluation of privacy risks for data processing |
+| **ADR** | Architecture Decision Record — documented architectural decisions |
+| **SLO** | Service Level Objective — target reliability/performance threshold |
+| **SLI** | Service Level Indicator — measurable attribute of service reliability |
+| **OTel** | OpenTelemetry — observability framework for traces, metrics, and logs |
+| **RAGAS** | Retrieval Augmented Generation Assessment — framework for evaluating RAG systems |
+
 ---
+
+## Companion Documents
+
+| Document | Description |
+|----------|-------------|
+| [hats/AGENTIC_AI_HATS_TEAM_STACK.md](hats/AGENTIC_AI_HATS_TEAM_STACK.md) | Complete standalone specification (Sections 1–16) with inline hat details and appendices |
+| [hats/HATS_TEAM_IMPLEMENTATION_GUIDE.md](hats/HATS_TEAM_IMPLEMENTATION_GUIDE.md) | Implementation guide (Appendix E of `hats/AGENTIC_AI_HATS_TEAM_STACK.md`): Ollama Cloud + n8n deployment, cost-optimized model selection, security box, self-improvement pipeline |
+| [hats/HATS_TEAM_CONCERNS_DISCUSSION.md](hats/HATS_TEAM_CONCERNS_DISCUSSION.md) | Concerns discussion (Appendix F of `hats/AGENTIC_AI_HATS_TEAM_STACK.md`): honest engagement with 17 real-world concerns about the Hats Team approach |
+
+---
+
+*This specification is a living document. As the agentic AI ecosystem evolves (new protocols, new attack vectors, new best practices), the Hats Team should be updated accordingly. Each hat's effectiveness metrics should be reviewed quarterly, and persona prompts should be refined based on false-positive/negative analysis.*
 
 ← [CATALOG](CATALOG.md) | [README](README.md)
