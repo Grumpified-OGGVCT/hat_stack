@@ -121,11 +121,57 @@ You don't need to adopt all 18 hats at once. The recommended path:
 
 ---
 
+## 🚀 Use It — GitHub Actions Integration
+
+Hat Stack runs **in GitHub** as a tool your other projects can call. Three integration patterns:
+
+### Quick Start: Fork & Go
+
+1. **Fork** this repo
+2. Add `OLLAMA_API_KEY` as a **Repository Secret** in your fork
+3. Done — your fork's workflows are live
+
+> **Your keys stay yours.** GitHub Secrets are encrypted, never in code, and never transferred to forks. See [`FORK_SETUP.md`](FORK_SETUP.md) for the full guide.
+
+### Hook Up Your Other Projects
+
+**Option A — Reusable Workflow** (recommended):
+```yaml
+# In your other repo: .github/workflows/hats.yml
+jobs:
+  hats-review:
+    uses: YOUR_USERNAME/hat_stack/.github/workflows/hats-review.yml@main
+    secrets:
+      ollama_api_key: ${{ secrets.OLLAMA_API_KEY }}
+```
+
+**Option B — Composite Action**:
+```yaml
+- uses: YOUR_USERNAME/hat_stack/.github/actions/run-hats@main
+  with:
+    diff_file: /tmp/pr.diff
+  env:
+    OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
+```
+
+**Option C — API Dispatch** (from any agent, script, or CI):
+```bash
+curl -X POST \
+  -H "Authorization: Bearer $GITHUB_TOKEN" \
+  https://api.github.com/repos/YOUR_USERNAME/hat_stack/dispatches \
+  -d '{"event_type":"run-hats","client_payload":{"diff":"...","callback_repo":"you/project","callback_pr":42}}'
+```
+
+→ Full integration guide: [`FORK_SETUP.md`](FORK_SETUP.md)
+
+---
+
 ## Documentation
 
 | Document | Description |
 |----------|-------------|
 | [`README.md`](README.md) | This file — project overview, architecture, and quick reference |
+| [`FORK_SETUP.md`](FORK_SETUP.md) | **Fork & Setup Guide** — get your own working Hat Stack in 5 minutes, secret management, integration patterns |
 | [`SPEC.md`](SPEC.md) | **Primary specification** — orchestration, gates, retry policies, HITL framework, CI/CD integration, security, deployment guide, and all appendices |
 | [`CATALOG.md`](CATALOG.md) | **Master Hat Registry** — design philosophy, full hat table with triggers, severity grading, and composite risk score |
 | [`hats/01_red_hat.md`](hats/01_red_hat.md) – [`hats/18_gold_hat.md`](hats/18_gold_hat.md) | Individual hat specifications with detailed assignments, severity grading, tools, and token budgets |
@@ -140,9 +186,23 @@ You don't need to adopt all 18 hats at once. The recommended path:
 ```
 hat_stack/
 ├── README.md                                  ← This file — project overview & navigation
+├── FORK_SETUP.md                              ← Fork & setup guide (start here for your own instance)
+├── .env.example                               ← Environment template (copy to .env for local use)
 ├── CATALOG.md                                 ← Master Hat Registry (full table + design philosophy)
 ├── SPEC.md                                    ← Primary specification (16 sections + appendices)
 ├── LICENSE                                    ← MIT License
+├── .github/
+│   ├── workflows/
+│   │   ├── hats-review.yml                    ← Reusable workflow (other repos call this)
+│   │   ├── hats-dispatch.yml                  ← Dispatch handler (API-triggered reviews)
+│   │   └── hats-self-review.yml               ← Self-review (reviews PRs to this repo)
+│   └── actions/
+│       └── run-hats/
+│           └── action.yml                     ← Composite action (direct step in any workflow)
+├── scripts/
+│   ├── hats_runner.py                         ← Python orchestrator (Conductor + all hat logic)
+│   ├── hat_configs.yml                        ← Hat-to-model mapping & configuration
+│   └── requirements.txt                       ← Python dependencies
 └── hats/
     ├── 01_red_hat.md                          ← Individual hat specifications
     ├── 02_black_hat.md

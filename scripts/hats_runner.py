@@ -34,6 +34,37 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_CONFIG = SCRIPT_DIR / "hat_configs.yml"
 
 # ---------------------------------------------------------------------------
+# Preflight health check — clear errors for missing configuration
+# ---------------------------------------------------------------------------
+
+def preflight_check() -> list[str]:
+    """Check that required environment is configured.
+
+    Returns a list of warning/error messages. Empty list = all good.
+    """
+    issues = []
+
+    api_key = os.environ.get("OLLAMA_API_KEY", "").strip()
+    if not api_key:
+        issues.append(
+            "❌ OLLAMA_API_KEY is not set.\n"
+            "   → For GitHub Actions: Add it as a Repository Secret\n"
+            "     (Settings → Secrets and variables → Actions → New repository secret)\n"
+            "   → For local use: Copy .env.example to .env and fill in your key\n"
+            "   → Get a key at: https://ollama.ai/cloud"
+        )
+
+    base_url = os.environ.get("OLLAMA_BASE_URL", "").strip()
+    if not base_url:
+        # Not an error — we have a default
+        issues.append(
+            "ℹ️  OLLAMA_BASE_URL not set — using default: https://api.ollama.ai/v1"
+        )
+
+    return issues
+
+
+# ---------------------------------------------------------------------------
 # Config loader
 # ---------------------------------------------------------------------------
 
@@ -588,6 +619,16 @@ def main():
     )
 
     args = parser.parse_args()
+
+    # Preflight health check — fail fast with clear guidance
+    issues = preflight_check()
+    has_errors = any(msg.startswith("❌") for msg in issues)
+    for msg in issues:
+        print(msg, file=sys.stderr)
+    if has_errors:
+        print("\n🛑 Cannot proceed — fix the errors above and try again.", file=sys.stderr)
+        print("   See FORK_SETUP.md for setup instructions.", file=sys.stderr)
+        sys.exit(2)
 
     # Load config
     config = load_config(args.config)

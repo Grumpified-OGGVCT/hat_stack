@@ -1,3 +1,37 @@
+# =============================================================================
+# 🎩 Hat Stack — Secret & Sensitive File Protection
+# =============================================================================
+# NEVER commit these files. Your API keys, tokens, and credentials
+# must stay in GitHub Secrets or local .env files only.
+
+# Environment files (may contain API keys)
+.env
+.env.*
+!.env.example
+.envrc
+
+# Secret/credential files
+*.key
+*.pem
+*.p12
+*.pfx
+*.crt
+secrets/
+.secrets/
+**/secrets.yml
+**/secrets.yaml
+**/credentials.yml
+**/credentials.yaml
+
+# Hats runtime output (may contain sensitive review data)
+hats-report.json
+hats-report.md
+/tmp/hats-*
+
+# =============================================================================
+# Python
+# =============================================================================
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
@@ -135,8 +169,7 @@ celerybeat.pid
 *.sage.py
 
 # Environments
-.env
-.envrc
+# (.env and .envrc are covered in the Hat Stack section above)
 .venv
 env/
 venv/

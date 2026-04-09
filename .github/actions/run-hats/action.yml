@@ -1,0 +1,144 @@
+# 🎩 Run Hats Review — Composite Action
+#
+# Use this action in any workflow to run the Hats pipeline on a diff.
+#
+# Usage:
+#   - name: Run Hats Review
+#     uses: Grumpified-OGGVCT/hat_stack/.github/actions/run-hats@main
+#     with:
+#       diff_file: /tmp/pr.diff
+#     env:
+#       OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
+
+name: "🎩 Run Hats Review"
+description: "Run the Hat Stack AI review pipeline on a code diff"
+
+inputs:
+  diff_file:
+    description: "Path to the diff file to review"
+    required: false
+    default: ""
+  diff:
+    description: "Inline diff text (for small diffs; use diff_file for large ones)"
+    required: false
+    default: ""
+  hats:
+    description: "Comma-separated hat IDs to run (default: auto-select based on triggers)"
+    required: false
+    default: ""
+  context:
+    description: "Additional context for the review (e.g., PR description)"
+    required: false
+    default: ""
+  config:
+    description: "Path to custom hat_configs.yml (default: uses built-in config)"
+    required: false
+    default: ""
+  output_format:
+    description: "Output format: json, markdown, or both"
+    required: false
+    default: "both"
+
+outputs:
+  verdict:
+    description: "The final Hats verdict: ALLOW, ESCALATE, or QUARANTINE"
+    value: ${{ steps.run.outputs.verdict }}
+  risk_score:
+    description: "Composite risk score (0-100)"
+    value: ${{ steps.run.outputs.risk_score }}
+  hats_executed:
+    description: "Number of hats that ran"
+    value: ${{ steps.run.outputs.hats_executed }}
+  report_markdown:
+    description: "Path to the Markdown report file"
+    value: ${{ steps.run.outputs.report_markdown }}
+  report_json:
+    description: "Path to the JSON report file"
+    value: ${{ steps.run.outputs.report_json }}
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout hat_stack
+      uses: actions/checkout@v4
+      with:
+        repository: Grumpified-OGGVCT/hat_stack
+        path: _hat_stack
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - name: Install dependencies
+      shell: bash
+      run: pip install -r _hat_stack/scripts/requirements.txt
+
+    - name: Prepare diff
+      id: prep
+      shell: bash
+      run: |
+        DIFF_FILE="/tmp/hats-action-diff.patch"
+
+        if [ -n "${{ inputs.diff_file }}" ] && [ -f "${{ inputs.diff_file }}" ]; then
+          cp "${{ inputs.diff_file }}" "$DIFF_FILE"
+        elif [ -n "${{ inputs.diff }}" ]; then
+          cat <<'HATS_DIFF_EOF' > "$DIFF_FILE"
+        ${{ inputs.diff }}
+        HATS_DIFF_EOF
+        else
+          echo "⚠️ No diff provided. Set either 'diff_file' or 'diff' input." >&2
+          echo "verdict=ALLOW" >> "$GITHUB_OUTPUT"
+          echo "risk_score=0" >> "$GITHUB_OUTPUT"
+          echo "hats_executed=0" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        echo "diff_file=$DIFF_FILE" >> "$GITHUB_OUTPUT"
+
+    - name: Run Hats Pipeline
+      id: run
+      shell: bash
+      env:
+        OLLAMA_API_KEY: ${{ env.OLLAMA_API_KEY }}
+        OLLAMA_BASE_URL: ${{ env.OLLAMA_BASE_URL || 'https://api.ollama.ai/v1' }}
+      run: |
+        CONFIG="_hat_stack/scripts/hat_configs.yml"
+        if [ -n "${{ inputs.config }}" ] && [ -f "${{ inputs.config }}" ]; then
+          CONFIG="${{ inputs.config }}"
+        fi
+
+        ARGS="--diff ${{ steps.prep.outputs.diff_file }}"
+        ARGS="$ARGS --config $CONFIG"
+        ARGS="$ARGS --output ${{ inputs.output_format }}"
+        ARGS="$ARGS --markdown-file /tmp/hats-report.md"
+        ARGS="$ARGS --json-file /tmp/hats-report.json"
+
+        if [ -n "${{ inputs.hats }}" ]; then
+          ARGS="$ARGS --hats ${{ inputs.hats }}"
+        fi
+
+        if [ -n "${{ inputs.context }}" ]; then
+          ARGS="$ARGS --context '${{ inputs.context }}'"
+        fi
+
+        set +e
+        python _hat_stack/scripts/hats_runner.py $ARGS
+        EXIT_CODE=$?
+        set -e
+
+        if [ -f /tmp/hats-report.json ]; then
+          VERDICT=$(python3 -c "import json; print(json.load(open('/tmp/hats-report.json'))['verdict'])")
+          RISK_SCORE=$(python3 -c "import json; print(json.load(open('/tmp/hats-report.json'))['risk_score'])")
+          HATS_EXECUTED=$(python3 -c "import json; print(json.load(open('/tmp/hats-report.json'))['hats_executed'])")
+        else
+          VERDICT="ALLOW"
+          RISK_SCORE="0"
+          HATS_EXECUTED="0"
+        fi
+
+        echo "verdict=$VERDICT" >> "$GITHUB_OUTPUT"
+        echo "risk_score=$RISK_SCORE" >> "$GITHUB_OUTPUT"
+        echo "hats_executed=$HATS_EXECUTED" >> "$GITHUB_OUTPUT"
+        echo "report_markdown=/tmp/hats-report.md" >> "$GITHUB_OUTPUT"
+        echo "report_json=/tmp/hats-report.json" >> "$GITHUB_OUTPUT"
