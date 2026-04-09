@@ -110,9 +110,8 @@ The following eight core assignments define this hat's complete review scope:
 - Final score is min(100, sum of above).
 
 **Score Interpretation:**
-- 0–10: Low risk → `ALLOW`
-- 11–30: Moderate risk → `ALLOW` with recommendations
-- 31–60: Elevated risk → `ESCALATE`
+- 0–20: Low risk → `ALLOW`
+- 21–60: Elevated risk → `ESCALATE`
 - 61–100: High risk → `QUARANTINE`
 - Any CRITICAL finding → `QUARANTINE` regardless of score
 

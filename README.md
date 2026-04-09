@@ -54,6 +54,7 @@ See [`CATALOG.md`](CATALOG.md) for the full table of all 18 hats.
 hat_stack/
 ├── README.md              ← This file — project overview & hat index
 ├── CATALOG.md             ← Master Hat Registry (full table)
+├── SPEC.md                ← Primary specification entry point
 └── hats/
     ├── 01_red_hat.md
     ├── 02_black_hat.md

@@ -35,7 +35,7 @@ The stack is grounded in the **2025–2026 agentic AI ecosystem**, incorporating
 **Key differentiators from prior art:**
 
 - **18 specialized hats** (up from the common 6–8) covering resilience, security, efficiency, integration, evolution, process, cross-feature architecture, innovation, AI safety, DevOps, token optimization, MCP/A2A contract validation, data governance, observability, accessibility, supply-chain integrity, and final convergent QA.
-- **16 personas** that embody human-like expertise, enabling each hat to reason with the nuance of a domain specialist rather than a generic LLM.
+- **20 personas** that embody human-like expertise, enabling each hat to reason with the nuance of a domain specialist rather than a generic LLM.
 - **A formal gate system** with five gate types (Quality, Cost, Security, Consistency, Timeliness) that control flow between orchestration phases.
 - **Explicit retry, backoff, and circuit-breaker policies** that prevent cascading failures across the agent network.
 - **A complete HITL framework** with interrupt-based checkpoints, escalation routing, approval workflows, and audit trails.
@@ -49,11 +49,11 @@ The stack is grounded in the **2025–2026 agentic AI ecosystem**, incorporating
 
 | # | Principle | Description |
 |---|-----------|-------------|
-| 1 | **Defense in Depth** | Every finding must be corroborated by at least two independent hats before escalating. No single hat can block a merge alone (except Black Hat for CRITICAL security findings). |
+| 1 | **Defense in Depth** | Every finding must be corroborated by at least two independent hats before escalating. No single hat may issue a final merge rejection alone; however, Black Hat may unilaterally place a change into **QUARANTINE** for a CRITICAL security finding, creating a temporary merge hold pending Gold Hat adjudication or an explicit policy/HITL decision. |
 | 2 | **Cost Consciousness** | Every LLM call is metered. Hats use tiered model selection: cheap/fast models for scanning, premium models for final adjudication. A global token budget gate prevents runaway costs. |
-| 3 | **Graceful Degradation** | If a hat times out or fails, the Conductor records the gap and proceeds. No single hat failure should block the pipeline — only the Gold Hat (CoVE) can issue a hard block. |
+| 3 | **Graceful Degradation** | If a hat times out or fails, the Conductor records the gap and proceeds. No single hat failure should block the pipeline. The **only** hat that may issue the final hard-block verdict in the default automated flow is the Gold Hat (CoVE), including confirmation, release, or rejection of any Black/Purple-initiated QUARANTINE. |
 | 4 | **Stateful Checkpointing** | The entire orchestration graph is persisted at every node boundary. Any interrupted run can be resumed from the last successful checkpoint. |
-| 5 | **Human Authority** | The system is advisory by default. Only explicitly configured policies (e.g., "block all PRs with CRITICAL security findings") can auto-reject. All other decisions are recommendations. |
+| 5 | **Human Authority** | The system is advisory by default. Explicitly configured policies may auto-enforce outcomes (for example, retaining QUARANTINE or auto-rejecting PRs with confirmed CRITICAL security findings). HITL reviewers may override any automated recommendation or quarantine unless a mandatory compliance policy forbids release; absent such policy, the final non-human hard-block verdict remains Gold Hat's responsibility. |
 | 6 | **Universal Applicability** | The hat taxonomy, gate logic, and orchestration patterns apply to any language, framework, or domain. Hat triggers are keyword- and AST-pattern-based, not language-specific. |
 | 7 | **Interoperability First** | All inter-hat communication uses structured JSON schemas. Hats expose findings via MCP-compatible interfaces, enabling composition with external tools. |
 | 8 | **Continuous Learning** | Hat effectiveness metrics (false-positive rate, coverage, latency) are tracked over time and fed back into persona prompt tuning. |
@@ -171,7 +171,7 @@ Each hat is powered by a **persona** — a detailed set of instructions, experti
 | **Herald** | ⚪ White Hat | Documentation perfectionist. Believes unreadable code is broken code. | Documentation generation, knowledge-base synchronization, API doc accuracy. | Palette, CoVE, Consolidator, Chronicler | Produces documentation so clear it reduces onboarding time by 50%. |
 | **Scout** | 🟡 Yellow Hat | External intelligence gatherer. Reads the internet so the team doesn't have to. | Competitive-tech scanning, emerging-threat detection, best-practice benchmarking. | Sentinel, Catalyst, Chronicler, Herald, Consolidator | Surfaces relevant industry developments before they hit Hacker News. |
 | **Weaver** | 🩵 Cyan Hat | Prompt-engineering meta-optimizer. Treats prompts as living, evolving programs. | Prompt design, self-improvement loops, evaluation methodology, LLM behavior modeling. | ALL personas | Can reduce prompt tokens by 30% while improving output quality by 15%. |
-| **Guardian** | �� Brown Hat | Data-stewardship zealot. Protects user privacy as a sacred duty. | Data governance, PIA generation, audit-trail enforcement, consent management. | Sentinel, Arbiter, Consolidator | Can trace every byte of PII through a system of 20+ microservices. |
+| **Guardian** | 🟤 Brown Hat | Data-stewardship zealot. Protects user privacy as a sacred duty. | Data governance, PIA generation, audit-trail enforcement, consent management. | Sentinel, Arbiter, Consolidator | Can trace every byte of PII through a system of 20+ microservices. |
 | **Observer** | ⚙️ Gray Hat | Systems-reliability philosopher. Believes you can only improve what you can measure. | Observability architecture, SLO definition, alerting design, incident readiness. | Catalyst, CoVE, Consolidator | Designs monitoring systems that predict failures 30 minutes before they happen. |
 | **Cartographer** | 🟣 Indigo Hat | Mapmaker of codebases. Sees structure in complexity. | Cross-module analysis, dependency mapping, architectural drift detection. | Strategist, Steward, Consolidator | Can detect emerging "big ball of mud" patterns from a single PR. |
 | **Smith** | 🔗 Steel Hat | Supply-chain sentinel. Verifies every link in the dependency chain. | SBOM management, vulnerability tracking, license compliance, freshness monitoring. | Sentinel, Observer, Consolidator | Has memorized every critical CVE from the past 24 months. |
@@ -1138,10 +1138,10 @@ The Gold Hat (CoVE) computes a composite risk score (0–100) from all hat findi
 
 ```
 risk_score = min(100,
-  (CRITICAL_count × 20, capped at 80) +
-  (HIGH_count × 5, capped at 40) +
-  (MEDIUM_count × 1, capped at 10) +
-  (LOW_count × 0.1, capped at 5)
+  min(80, CRITICAL_count × 20) +
+  min(40, HIGH_count × 5) +
+  min(10, MEDIUM_count × 1) +
+  min(5, LOW_count × 0.1)
 )
 ```
 
