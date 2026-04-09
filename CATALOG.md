@@ -1,6 +1,37 @@
 # Master Hat Registry
 
-The Hats Team — Complete Role Catalog (section 4.1)
+> **Full specification:** See [SPEC.md](SPEC.md) for the complete technical specification including orchestration architecture, gate system, retry policies, HITL framework, CI/CD integration, security stack, and deployment guide.
+
+---
+
+## Design Philosophy
+
+The Hats Team is built on eight core tenets:
+
+| # | Principle | Description |
+|---|-----------|-------------|
+| 1 | **Defense in Depth** | Every finding must be corroborated by at least two independent hats before escalating. No single hat can block a merge alone (except Black Hat for CRITICAL security findings). |
+| 2 | **Cost Consciousness** | Every LLM call is metered. Hats use tiered model selection: cheap/fast models for scanning, premium models for final adjudication. A global token budget gate prevents runaway costs. |
+| 3 | **Graceful Degradation** | If a hat times out or fails, the Conductor records the gap and proceeds. No single hat failure should block the pipeline — only the Gold Hat (CoVE) can issue a hard block. |
+| 4 | **Stateful Checkpointing** | The entire orchestration graph is persisted at every node boundary. Any interrupted run can be resumed from the last successful checkpoint. |
+| 5 | **Human Authority** | The system is advisory by default. Only explicitly configured policies (e.g., "block all PRs with CRITICAL security findings") can auto-reject. All other decisions are recommendations. |
+| 6 | **Universal Applicability** | The hat taxonomy, gate logic, and orchestration patterns apply to any language, framework, or domain. Hat triggers are keyword- and AST-pattern-based, not language-specific. |
+| 7 | **Interoperability First** | All inter-hat communication uses structured JSON schemas. Hats expose findings via MCP-compatible interfaces, enabling composition with external tools. |
+| 8 | **Continuous Learning** | Hat effectiveness metrics (false-positive rate, coverage, latency) are tracked over time and fed back into persona prompt tuning. |
+
+---
+
+## Merge Decision Verdicts
+
+| Verdict | Meaning | Condition |
+|---------|---------|-----------|
+| **`ALLOW`** | Safe to merge | No CRITICAL findings; composite risk score ≤ 20 |
+| **`ESCALATE`** | Requires human review | One or more HIGH findings; risk score 21–60; or AI Act high-risk classification |
+| **`QUARANTINE`** | Hard block — cannot merge | Any CRITICAL finding from any hat; risk score > 60 |
+
+---
+
+## Complete Hat Registry (Section 4.1)
 
 | # | Emoji | Hat Name | Run Mode | Trigger Conditions | Primary Focus |
 |---|-------|----------|----------|--------------------|---------------|
@@ -23,8 +54,43 @@ The Hats Team — Complete Role Catalog (section 4.1)
 | 17 | 🧪 | [Chartreuse Hat — Testing & Evaluation](hats/17_chartreuse_hat.md) | Conditional | Test additions/changes, evaluation pipelines, benchmark updates | Test coverage, RAGAS metrics, prompt evaluation, regression detection |
 | 18 | ✨ | [Gold Hat — CoVE (Convergent Verification & Expert) — Final QA](hats/18_gold_hat.md) | **Always (Last)** | After all other hats complete | 14-dimension adversarial QA, merge-ready decision, severity adjudication |
 
-> **Always hats** (2, 6, 9, 18) run on every PR. All other hats are **Conditional** and activate based on their trigger conditions.
+> **Always hats** (⚫ #2, 🔵 #6, 🟪 #9, ✨ #18) run on every PR. All other hats are **Conditional** and activate based on their trigger conditions.
 
 ---
 
-Back to [README](README.md)
+## Severity Grading
+
+All hats use a consistent four-level severity scale:
+
+| Severity | Definition | Required Action |
+|----------|-----------|----------------|
+| **CRITICAL** | Actively exploitable vulnerability or guaranteed production failure | Must be fixed before merge. Hard block. No exceptions. |
+| **HIGH** | Significant risk under production conditions | Must be addressed before merge or explicitly accepted by Tier-2+ reviewer |
+| **MEDIUM** | Best-practice deviation that could become HIGH/CRITICAL | Should be addressed; may be deferred to follow-up PR if documented |
+| **LOW** | Minor improvement or best-practice suggestion | Informational. No action required for merge. |
+
+---
+
+## Composite Risk Score
+
+The Gold Hat (CoVE) computes a composite risk score (0–100):
+
+```
+risk_score = min(100,
+  CRITICAL_count × 20  (capped at 80) +
+  HIGH_count × 5       (capped at 40) +
+  MEDIUM_count × 1     (capped at 10) +
+  LOW_count × 0.1      (capped at 5)
+)
+```
+
+| Score Range | Verdict |
+|-------------|---------|
+| 0–20 | `ALLOW` |
+| 21–60 | `ESCALATE` |
+| 61–100 | `QUARANTINE` |
+| Any CRITICAL | `QUARANTINE` (regardless of score) |
+
+---
+
+Back to [README](README.md) · Full spec: [SPEC.md](SPEC.md)
