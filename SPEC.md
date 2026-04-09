@@ -1216,6 +1216,6 @@ risk_score = min(100,
 
 ---
 
-*This specification is a living document. As the agentic AI ecosystem evolves (new protocols, new attack vectors, new best practices), the Hats team should be updated accordingly. Each hat's effectiveness metrics should be reviewed quarterly, and persona prompts should be refined based on false-positive/negative analysis.*
+*This specification is a living document. As the agentic AI ecosystem evolves (new protocols, new attack vectors, new best practices), the Hats Team should be updated accordingly. Each hat's effectiveness metrics should be reviewed quarterly, and persona prompts should be refined based on false-positive/negative analysis.*
 
 ← [CATALOG](CATALOG.md) | [README](README.md)
