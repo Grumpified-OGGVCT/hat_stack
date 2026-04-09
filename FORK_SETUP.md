@@ -146,6 +146,73 @@ curl -X POST \
 
 The Hats review runs in **your fork** of hat_stack, using **your API key**, and posts results back to the specified PR.
 
+### Option D: `hat` CLI + Task Mode (for local agents like Copilot)
+
+This is the big one — your local VS Code Copilot agent (or any script) can tell hat_stack to **do real work**, not just review.
+
+**Install the `hat` CLI:**
+```bash
+# Option 1: Symlink (recommended)
+ln -s /path/to/your/hat_stack/scripts/hat /usr/local/bin/hat
+
+# Option 2: Copy
+cp scripts/hat /usr/local/bin/hat
+
+# Point to your fork
+export HAT_STACK_REPO="YOUR_USERNAME/hat_stack"
+```
+
+**Available tasks:**
+
+| Task | What It Does | Primary Hat |
+|------|-------------|-------------|
+| `generate_code` | Build modules, functions, classes, APIs | 🟢 Green Hat |
+| `generate_docs` | Write documentation, READMEs, ADRs, specs | 🔵 Blue Hat |
+| `refactor` | Restructure, optimize, or modernize code | ⚪ White Hat |
+| `analyze` | Deep analysis with written report | ⚫ Black Hat |
+| `plan` | Implementation plans, roadmaps, breakdowns | 🩵 Cyan Hat |
+| `test` | Generate test suites, cases, fixtures | 🧪 Chartreuse Hat |
+
+**Examples (what you or your Copilot agent would run):**
+
+```bash
+# Generate a new code module — results posted as a PR comment
+hat task generate_code "Build a FastAPI auth module with JWT and refresh tokens" \
+  --repo myorg/myapp --pr 42
+
+# Write documentation for an endpoint
+hat task generate_docs "Write API documentation for the /users endpoints" \
+  --repo myorg/myapp --issue 10
+
+# Plan a migration
+hat task plan "Plan a migration from REST to GraphQL for the orders service" \
+  --repo myorg/myapp
+
+# Generate tests for a module
+hat task test "Write unit tests for auth.py covering edge cases and error paths" \
+  --repo myorg/myapp --pr 88
+
+# Security analysis
+hat task analyze "Security audit of the payment processing module" \
+  --repo myorg/payments --issue 5
+
+# Review a diff (same as dispatch)
+git diff main | hat review - --repo myorg/myapp --pr 123
+
+# Check status of runs
+hat status
+```
+
+**How it works under the hood:**
+1. Your local `hat` CLI calls `gh api repos/YOUR_USERNAME/hat_stack/dispatches`
+2. GitHub Actions picks it up and runs the `hats-task.yml` workflow
+3. The task runner selects the right hats and models for the job
+4. Primary hat generates the deliverable, supporting hats review/enhance it
+5. Gold Hat does final QA
+6. Results are posted back to your project's PR/issue as a comment
+
+**For Copilot in VS Code:** Your Copilot agent can shell out to `hat task ...` commands. The `gh` CLI handles auth, and hat_stack handles execution. Your Copilot agent gives the instruction, hat_stack's model pool does the heavy lifting, results come back to the PR.
+
 ---
 
 ## Customizing Models

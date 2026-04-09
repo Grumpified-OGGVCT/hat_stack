@@ -151,11 +151,13 @@ def call_ollama(config: dict, model: str, system_prompt: str, user_prompt: str,
                 timeout: int = 120) -> dict:
     """Call the Ollama Cloud OpenAI-compatible chat completions endpoint."""
     api_cfg = config["api"]
-    base_url = os.environ.get(api_cfg["api_key_env"] and api_cfg["base_url_env"],
-                               api_cfg["default_base_url"])
-    # Resolve base URL from env or default
-    base_url = os.environ.get("OLLAMA_BASE_URL", api_cfg["default_base_url"])
-    api_key = os.environ.get("OLLAMA_API_KEY", "")
+    base_url = os.environ.get(
+        api_cfg.get("base_url_env", "OLLAMA_BASE_URL"),
+        api_cfg.get("default_base_url", "https://api.ollama.ai/v1"),
+    )
+    api_key = os.environ.get(
+        api_cfg.get("api_key_env", "OLLAMA_API_KEY"), ""
+    )
 
     if not api_key:
         return {

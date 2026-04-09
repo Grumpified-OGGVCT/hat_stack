@@ -61,11 +61,15 @@ jobs:
           # Extract diff from payload
           echo "$PAYLOAD" | python3 -c "
           import json, sys
-          payload = json.load(sys.stdin)
-          diff = payload.get('diff', '')
+          try:
+              payload = json.load(sys.stdin)
+              diff = payload.get('diff', '')
+          except (json.JSONDecodeError, KeyError) as e:
+              print(f'Warning: Could not parse payload: {e}', file=sys.stderr)
+              diff = ''
           with open('$DIFF_FILE', 'w') as f:
               f.write(diff)
-          " 2>/dev/null || echo "" > "$DIFF_FILE"
+          " || echo "" > "$DIFF_FILE"
 
           echo "diff_file=$DIFF_FILE" >> "$GITHUB_OUTPUT"
 
@@ -137,18 +141,22 @@ jobs:
             exit 0
           fi
 
+          # Build comment body from report or fallback
           if [ -f /tmp/hats-report.md ]; then
-            BODY=$(cat /tmp/hats-report.md)
+            REPORT_BODY=$(cat /tmp/hats-report.md)
           else
-            BODY="🎩 Hats Review completed. Verdict: ${{ steps.run.outputs.verdict }} (Score: ${{ steps.run.outputs.risk_score }})"
+            REPORT_BODY="🎩 Hats Review completed. Verdict: ${{ steps.run.outputs.verdict }} (Score: ${{ steps.run.outputs.risk_score }})"
           fi
 
-          # Post comment to the callback PR
-          curl -s -X POST \
+          python3 -c "
+          import json, sys
+          body = sys.stdin.read()
+          print(json.dumps({'body': body}))
+          " <<< "$REPORT_BODY" | curl -s -X POST \
             -H "Authorization: Bearer $GH_TOKEN" \
             -H "Accept: application/vnd.github+json" \
             "https://api.github.com/repos/$CALLBACK_REPO/issues/$CALLBACK_PR/comments" \
-            -d "$(python3 -c "import json; print(json.dumps({'body': open('/tmp/hats-report.md').read() if __import__('os').path.exists('/tmp/hats-report.md') else 'Hats Review completed.'}))")"
+            -d @-
 
           echo "✅ Results posted to $CALLBACK_REPO#$CALLBACK_PR"
 
@@ -166,11 +174,21 @@ jobs:
             exit 0
           fi
 
-          curl -s -X POST \
+          if [ -f /tmp/hats-report.md ]; then
+            REPORT_BODY=$(cat /tmp/hats-report.md)
+          else
+            REPORT_BODY="🎩 Hats Review completed."
+          fi
+
+          python3 -c "
+          import json, sys
+          body = sys.stdin.read()
+          print(json.dumps({'body': body}))
+          " <<< "$REPORT_BODY" | curl -s -X POST \
             -H "Authorization: Bearer $GH_TOKEN" \
             -H "Accept: application/vnd.github+json" \
             "https://api.github.com/repos/$CALLBACK_REPO/issues/$CALLBACK_ISSUE/comments" \
-            -d "$(python3 -c "import json; print(json.dumps({'body': open('/tmp/hats-report.md').read() if __import__('os').path.exists('/tmp/hats-report.md') else 'Hats Review completed.'}))")"
+            -d @-
 
           echo "✅ Results posted to $CALLBACK_REPO#$CALLBACK_ISSUE"
 
