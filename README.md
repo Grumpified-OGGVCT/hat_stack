@@ -77,7 +77,7 @@ The system is built on eight core tenets:
 |---------|---------|-----------|
 | **`ALLOW`** | Safe to merge | No CRITICAL findings; composite risk score ≤ 20 |
 | **`ESCALATE`** | Requires human review | One or more HIGH findings; risk score 21–60; or AI Act high-risk classification |
-| **`QUARANTINE`** | Hard block — cannot merge | Any CRITICAL finding from any hat; risk score > 60 |
+| **`QUARANTINE`** | Temporary hold — cannot merge pending adjudication | Any CRITICAL finding triggers a quarantine hold pending Gold Hat adjudication; risk score > 60 |
 
 ---
 
@@ -130,8 +130,8 @@ You don't need to adopt all 18 hats at once. The recommended path:
 | [`CATALOG.md`](CATALOG.md) | **Master Hat Registry** — design philosophy, full hat table with triggers, severity grading, and composite risk score |
 | [`hats/01_red_hat.md`](hats/01_red_hat.md) – [`hats/18_gold_hat.md`](hats/18_gold_hat.md) | Individual hat specifications with detailed assignments, severity grading, tools, and token budgets |
 | [`hats/AGENTIC_AI_HATS_TEAM_STACK.md`](hats/AGENTIC_AI_HATS_TEAM_STACK.md) | **Complete Specification** (standalone) — the full 16-section specification including inline hat details, personas, orchestration, gates, and appendices |
-| [`hats/HATS_TEAM_IMPLEMENTATION_GUIDE.md`](hats/HATS_TEAM_IMPLEMENTATION_GUIDE.md) | **Appendix E — Implementation Guide** — running the Hats Team on Ollama Cloud + n8n: LLM backend mapping, cost-optimized model selection, n8n workflow architecture, security box, self-improvement pipeline, and step-by-step deployment |
-| [`hats/HATS_TEAM_CONCERNS_DISCUSSION.md`](hats/HATS_TEAM_CONCERNS_DISCUSSION.md) | **Appendix F — Addressing Concerns** — honest engagement with 17 real-world concerns including over-engineering, cost, latency, false positives, non-determinism, and "show me working code" |
+| [`hats/HATS_TEAM_IMPLEMENTATION_GUIDE.md`](hats/HATS_TEAM_IMPLEMENTATION_GUIDE.md) | **Implementation Guide** — running the Hats Team on Ollama Cloud + n8n: LLM backend mapping, cost-optimized model selection, n8n workflow architecture, security box, self-improvement pipeline, and step-by-step deployment |
+| [`hats/HATS_TEAM_CONCERNS_DISCUSSION.md`](hats/HATS_TEAM_CONCERNS_DISCUSSION.md) | **Addressing Concerns** — honest engagement with 17 real-world concerns including over-engineering, cost, latency, false positives, non-determinism, and "show me working code" |
 
 ---
 
@@ -149,8 +149,8 @@ hat_stack/
     ├── ...
     ├── 18_gold_hat.md
     ├── AGENTIC_AI_HATS_TEAM_STACK.md          ← Complete standalone specification
-    ├── HATS_TEAM_IMPLEMENTATION_GUIDE.md      ← Appendix E: Ollama Cloud + n8n implementation
-    └── HATS_TEAM_CONCERNS_DISCUSSION.md       ← Appendix F: Addressing concerns & FAQ
+    ├── HATS_TEAM_IMPLEMENTATION_GUIDE.md      ← Implementation guide: Ollama Cloud + n8n
+    └── HATS_TEAM_CONCERNS_DISCUSSION.md       ← Addressing concerns & FAQ
 ```
 
 ---

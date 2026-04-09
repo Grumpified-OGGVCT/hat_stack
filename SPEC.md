@@ -1117,7 +1117,7 @@ When the cost budget gate limits the number of hats that can run, use this prior
 2. 🟪 Purple (AI safety — non-negotiable)
 3. 🔵 Blue (process — non-negotiable)
 4. 🔗 Steel (supply chain — fast and cheap)
-5. ⚪ White (process quality — fast and cheap)
+5. ⚪ White (efficiency & resources — fast and cheap)
 6. 🧪 Chartreuse (testing quality)
 7. 🔴 Red (resilience)
 8. ⚙️ Gray (observability)
@@ -1183,7 +1183,7 @@ risk_score = min(100,
 - Score 0–20: **ALLOW** (auto-approved)
 - Score 21–60: **ESCALATE** (human review required)
 - Score 61–100: **QUARANTINE** (hard block)
-- Any CRITICAL finding: **QUARANTINE** regardless of score
+- Any Gold Hat-confirmed/adjudicated **CRITICAL** finding: **QUARANTINE** regardless of score
 
 ### Appendix F: Glossary
 
@@ -1211,8 +1211,8 @@ risk_score = min(100,
 | Document | Description |
 |----------|-------------|
 | [hats/AGENTIC_AI_HATS_TEAM_STACK.md](hats/AGENTIC_AI_HATS_TEAM_STACK.md) | Complete standalone specification (Sections 1–16) with inline hat details and appendices |
-| [hats/HATS_TEAM_IMPLEMENTATION_GUIDE.md](hats/HATS_TEAM_IMPLEMENTATION_GUIDE.md) | Appendix E — Implementation guide: Ollama Cloud + n8n deployment, cost-optimized model selection, security box, self-improvement pipeline |
-| [hats/HATS_TEAM_CONCERNS_DISCUSSION.md](hats/HATS_TEAM_CONCERNS_DISCUSSION.md) | Appendix F — Addressing concerns: honest engagement with 17 real-world concerns about the Hats Team approach |
+| [hats/HATS_TEAM_IMPLEMENTATION_GUIDE.md](hats/HATS_TEAM_IMPLEMENTATION_GUIDE.md) | Implementation guide (Appendix E of `hats/AGENTIC_AI_HATS_TEAM_STACK.md`): Ollama Cloud + n8n deployment, cost-optimized model selection, security box, self-improvement pipeline |
+| [hats/HATS_TEAM_CONCERNS_DISCUSSION.md](hats/HATS_TEAM_CONCERNS_DISCUSSION.md) | Concerns discussion (Appendix F of `hats/AGENTIC_AI_HATS_TEAM_STACK.md`): honest engagement with 17 real-world concerns about the Hats Team approach |
 
 ---
 
