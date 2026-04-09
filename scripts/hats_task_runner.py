@@ -69,7 +69,7 @@ TASK_PROFILES = {
     "analyze": {
         "description": "Deep analysis with written report",
         "recommended_hats": ["black", "purple", "red", "gray", "brown", "gold"],
-        "primary_hat": "black",  # Depends on what's being analyzed
+        "primary_hat": "black",  # Black Hat is default for security-focused analysis
         "model_tier": 1,
         "output_type": "markdown",
     },
@@ -303,12 +303,12 @@ def run_task_pipeline(config: dict, task_type: str, user_prompt: str,
         sys.exit(2)
 
     # Select hats
-    if requested_hats:
+    if requested_hats and len(requested_hats) > 0:
         hat_ids = requested_hats
     else:
         hat_ids = profile["recommended_hats"]
 
-    primary_hat = requested_hats[0] if requested_hats else profile["primary_hat"]
+    primary_hat = hat_ids[0] if requested_hats and len(requested_hats) > 0 else profile["primary_hat"]
     supporting_hats = [h for h in hat_ids if h != primary_hat and h != "gold"]
 
     print(f"🎩 Task: {profile['description']}", file=sys.stderr)

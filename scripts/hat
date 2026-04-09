@@ -110,19 +110,20 @@ cmd_review() {
 
   info "Dispatching review to ${HAT_STACK_REPO}..."
 
-  # Build payload
+  # Build payload — pass vars via env to avoid shell injection
   local payload
-  payload=$(python3 -c "
-import json, sys
+  payload=$(HAT_CB_REPO="$callback_repo" HAT_CB_PR="$callback_pr" \
+    HAT_CB_ISSUE="$callback_issue" HAT_HATS="$hats" HAT_CTX="$context" \
+    python3 -c "
+import json, os, sys
 payload = {
     'diff': sys.stdin.read(),
-    'callback_repo': '$callback_repo',
-    'callback_pr': '$callback_pr',
-    'callback_issue': '$callback_issue',
-    'hats': '$hats',
-    'context': '$context',
+    'callback_repo': os.environ.get('HAT_CB_REPO', ''),
+    'callback_pr': os.environ.get('HAT_CB_PR', ''),
+    'callback_issue': os.environ.get('HAT_CB_ISSUE', ''),
+    'hats': os.environ.get('HAT_HATS', ''),
+    'context': os.environ.get('HAT_CTX', ''),
 }
-# Remove empty values
 payload = {k: v for k, v in payload.items() if v}
 print(json.dumps(payload))
 " <<< "$diff_text")
@@ -163,17 +164,21 @@ cmd_task() {
   info "Dispatching task '${task_type}' to ${HAT_STACK_REPO}..."
   info "Prompt: ${prompt}"
 
+  # Build payload — pass vars via env to avoid shell injection
   local payload
-  payload=$(python3 -c "
-import json
+  payload=$(HAT_TASK="$task_type" HAT_PROMPT="$prompt" \
+    HAT_CB_REPO="$callback_repo" HAT_CB_PR="$callback_pr" \
+    HAT_CB_ISSUE="$callback_issue" HAT_HATS="$hats" HAT_CTX="$context" \
+    python3 -c "
+import json, os
 payload = {
-    'task': '$task_type',
-    'prompt': '''$prompt''',
-    'callback_repo': '$callback_repo',
-    'callback_pr': '$callback_pr',
-    'callback_issue': '$callback_issue',
-    'hats': '$hats',
-    'context': '$context',
+    'task': os.environ.get('HAT_TASK', ''),
+    'prompt': os.environ.get('HAT_PROMPT', ''),
+    'callback_repo': os.environ.get('HAT_CB_REPO', ''),
+    'callback_pr': os.environ.get('HAT_CB_PR', ''),
+    'callback_issue': os.environ.get('HAT_CB_ISSUE', ''),
+    'hats': os.environ.get('HAT_HATS', ''),
+    'context': os.environ.get('HAT_CTX', ''),
 }
 payload = {k: v for k, v in payload.items() if v}
 print(json.dumps(payload))

@@ -79,15 +79,25 @@ jobs:
         run: |
           PAYLOAD='${{ toJson(github.event.client_payload) }}'
           echo "$PAYLOAD" | python3 -c "
-          import json, sys, os
-          payload = json.load(sys.stdin)
+          import json, sys, os, re
+
+          def sanitize(value):
+              '''Remove newlines and control chars to prevent output injection.'''
+              if not isinstance(value, str):
+                  value = str(value) if value is not None else ''
+              return re.sub(r'[\r\n]', ' ', value).strip()
+
+          try:
+              payload = json.load(sys.stdin)
+          except json.JSONDecodeError:
+              payload = {}
           gh_output = os.environ['GITHUB_OUTPUT']
           with open(gh_output, 'a') as f:
-              f.write(f\"hats={payload.get('hats', '')}\n\")
-              f.write(f\"context={payload.get('context', '')}\n\")
-              f.write(f\"callback_repo={payload.get('callback_repo', '')}\n\")
-              f.write(f\"callback_pr={payload.get('callback_pr', '')}\n\")
-              f.write(f\"callback_issue={payload.get('callback_issue', '')}\n\")
+              f.write(f\"hats={sanitize(payload.get('hats', ''))}\n\")
+              f.write(f\"context={sanitize(payload.get('context', ''))}\n\")
+              f.write(f\"callback_repo={sanitize(payload.get('callback_repo', ''))}\n\")
+              f.write(f\"callback_pr={sanitize(payload.get('callback_pr', ''))}\n\")
+              f.write(f\"callback_issue={sanitize(payload.get('callback_issue', ''))}\n\")
           "
 
       - name: Run Hats Pipeline

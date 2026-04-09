@@ -88,30 +88,45 @@ jobs:
         run: |
           # Determine source: workflow_dispatch or repository_dispatch
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # workflow_dispatch inputs are controlled by the UI schema — safe
             echo "task=${{ inputs.task }}" >> "$GITHUB_OUTPUT"
-            echo "prompt=${{ inputs.prompt }}" >> "$GITHUB_OUTPUT"
             echo "hats=${{ inputs.hats }}" >> "$GITHUB_OUTPUT"
             echo "callback_repo=${{ inputs.callback_repo }}" >> "$GITHUB_OUTPUT"
             echo "callback_pr=${{ inputs.callback_pr }}" >> "$GITHUB_OUTPUT"
             echo "callback_issue=${{ inputs.callback_issue }}" >> "$GITHUB_OUTPUT"
+            # Prompt may contain special chars — sanitize newlines
+            python3 -c "
+          import os, re
+          val = '''${{ inputs.prompt }}'''
+          sanitized = re.sub(r'[\r\n]', ' ', val).strip()
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f'prompt={sanitized}\n')
+          "
           else
-            # repository_dispatch — extract from client_payload
+            # repository_dispatch — extract from client_payload with sanitization
             PAYLOAD='${{ toJson(github.event.client_payload) }}'
             echo "$PAYLOAD" | python3 -c "
-          import json, sys, os
+          import json, sys, os, re
+
+          def sanitize(value):
+              '''Remove newlines and control chars to prevent output injection.'''
+              if not isinstance(value, str):
+                  value = str(value) if value is not None else ''
+              return re.sub(r'[\r\n]', ' ', value).strip()
+
           try:
               payload = json.load(sys.stdin)
           except json.JSONDecodeError:
               payload = {}
           gh_output = os.environ['GITHUB_OUTPUT']
           with open(gh_output, 'a') as f:
-              f.write(f\"task={payload.get('task', 'analyze')}\n\")
-              f.write(f\"prompt={payload.get('prompt', '')}\n\")
-              f.write(f\"hats={payload.get('hats', '')}\n\")
-              f.write(f\"callback_repo={payload.get('callback_repo', '')}\n\")
-              f.write(f\"callback_pr={payload.get('callback_pr', '')}\n\")
-              f.write(f\"callback_issue={payload.get('callback_issue', '')}\n\")
-              f.write(f\"context={payload.get('context', '')}\n\")
+              f.write(f\"task={sanitize(payload.get('task', 'analyze'))}\n\")
+              f.write(f\"prompt={sanitize(payload.get('prompt', ''))}\n\")
+              f.write(f\"hats={sanitize(payload.get('hats', ''))}\n\")
+              f.write(f\"callback_repo={sanitize(payload.get('callback_repo', ''))}\n\")
+              f.write(f\"callback_pr={sanitize(payload.get('callback_pr', ''))}\n\")
+              f.write(f\"callback_issue={sanitize(payload.get('callback_issue', ''))}\n\")
+              f.write(f\"context={sanitize(payload.get('context', ''))}\n\")
           "
           fi
 
