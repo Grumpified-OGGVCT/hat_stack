@@ -229,6 +229,8 @@ hat status
 
 If you do not pass `--category`, `--genre`, or `--project`, Hat Stack infers sensible defaults and creates the folders automatically.
 
+If the first Ollama model fails during task mode, Hat Stack automatically retries comparable configured fallback models before giving up.
+
 **For Copilot in VS Code:** Your Copilot agent can shell out to `hat task ...` commands. The `gh` CLI handles auth, and hat_stack handles execution. Your Copilot agent gives the instruction, hat_stack's model pool does the heavy lifting, results come back to the PR.
 
 ---

@@ -428,6 +428,42 @@ def select_model_for_task(config: dict, hat_id: str, task_type: str) -> str:
     return hat_def.get("primary_model", "nemotron-3-super")
 
 
+def build_comparable_model_sequence(
+    config: dict,
+    primary_model: str,
+    fallback_model: str | None = None,
+) -> list[str]:
+    """Build a prioritized model fallback list using comparable configured tiers."""
+    models_cfg = config.get("models", {})
+    seen = set()
+    ordered_models = []
+
+    def add(model_name: str | None):
+        if model_name and model_name in models_cfg and model_name not in seen:
+            ordered_models.append(model_name)
+            seen.add(model_name)
+
+    add(primary_model)
+    add(fallback_model)
+
+    primary_tier = models_cfg.get(primary_model, {}).get("tier")
+    fallback_tier = models_cfg.get(fallback_model, {}).get("tier") if fallback_model else None
+
+    for model_name, model_meta in models_cfg.items():
+        if model_meta.get("tier") == primary_tier:
+            add(model_name)
+
+    if fallback_tier and fallback_tier != primary_tier:
+        for model_name, model_meta in models_cfg.items():
+            if model_meta.get("tier") == fallback_tier:
+                add(model_name)
+
+    for model_name in models_cfg:
+        add(model_name)
+
+    return ordered_models
+
+
 def build_task_prompt(config: dict, hat_id: str, task_type: str,
                       user_prompt: str, context_files: dict | None = None) -> tuple[str, str]:
     """Build the system and user prompts for a task execution.
@@ -466,29 +502,34 @@ def run_task_hat(config: dict, hat_id: str, task_type: str,
     )
 
     start = time.time()
-    result = call_ollama(
-        config, model, system_prompt, full_user_prompt,
-        temperature=hat_def.get("temperature", 0.3),
-        max_tokens=8192,  # Task mode needs more output room
-        timeout=hat_def.get("timeout_seconds", 300),
-    )
-    elapsed = time.time() - start
-
-    # Try fallback if primary fails
-    if result["error"] and hat_def.get("fallback_model"):
+    attempted_models = []
+    result = {
+        "error": "No model attempts executed",
+        "model": model,
+        "content": None,
+        "usage": {"input": 0, "output": 0},
+    }
+    for candidate_model in build_comparable_model_sequence(
+        config, model, hat_def.get("fallback_model")
+    ):
+        attempted_models.append(candidate_model)
         result = call_ollama(
-            config, hat_def["fallback_model"], system_prompt, full_user_prompt,
+            config, candidate_model, system_prompt, full_user_prompt,
             temperature=hat_def.get("temperature", 0.3),
-            max_tokens=8192,
+            max_tokens=8192,  # Task mode needs more output room
             timeout=hat_def.get("timeout_seconds", 300),
         )
-        elapsed = time.time() - start
+        if not result["error"]:
+            break
+
+    elapsed = time.time() - start
 
     report = {
         "hat_id": hat_id,
         "hat_name": hat_def.get("name", hat_id),
         "emoji": hat_def.get("emoji", "🎩"),
         "model_used": result["model"],
+        "attempted_models": attempted_models,
         "latency_seconds": round(elapsed, 2),
         "token_usage": result["usage"],
         "error": result["error"],
@@ -511,6 +552,11 @@ def run_task_hat(config: dict, hat_id: str, task_type: str,
                 "description": "Raw model output (JSON parsing failed)",
             }]
             report["summary"] = "Model returned unstructured output"
+
+    if len(attempted_models) > 1 and report["model_used"] != attempted_models[0]:
+        report["notes"].append(
+            f"Primary model fallback used: {attempted_models[0]} → {report['model_used']}"
+        )
 
     return report
 

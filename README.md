@@ -215,6 +215,7 @@ Task runs now support a structured playground sandbox on the runner:
 - Layout: `<workspace>/<category>/<genre>/<project>/<run-id>/`
 - Contents: generated files, `HATS_TASK_SUMMARY.md`, `hats_task_result.json`, `PLAYGROUND_MANIFEST.json`
 - Persistence: both the run output and the full playground tree are uploaded as workflow artifacts
+- Resilience: if the first Ollama model fails, task mode retries comparable configured fallback models automatically
 
 Or dispatch directly via `gh` CLI (what your Copilot agent would call):
 
