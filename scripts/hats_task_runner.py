@@ -171,7 +171,7 @@ def build_run_id(explicit_run_id: str | None = None) -> str:
     github_run_id = os.environ.get("GITHUB_RUN_ID", "").strip()
     github_attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "").strip()
     if github_run_id:
-        attempt_suffix = f"-attempt-{github_attempt}" if github_attempt != "" else ""
+        attempt_suffix = f"-attempt-{github_attempt}" if github_attempt else ""
         return f"run-{slugify_path_component(github_run_id, 'run')}{attempt_suffix}"
 
     return time.strftime("run-%Y%m%d-%H%M%S", time.gmtime())
@@ -197,7 +197,7 @@ def ensure_path_within_root(root: Path, candidate: Path) -> Path:
 def safe_output_path(output_dir: Path, relative_path: str) -> Path:
     """Return a safe output path within the output directory."""
     if not relative_path.strip():
-        raise ValueError(f"Unsafe generated file path: {relative_path!r}")
+        raise ValueError("Empty file path is not allowed")
     rel = Path(relative_path)
     if rel.is_absolute():
         raise ValueError(f"Unsafe generated file path: {relative_path!r}")
@@ -511,7 +511,6 @@ def run_task_hat(config: dict, hat_id: str, task_type: str,
 
     start = time.time()
     attempted_models = []
-    fallback_used = False
     result = {
         "error": "All model attempts failed",
         "model": model,
@@ -529,10 +528,10 @@ def run_task_hat(config: dict, hat_id: str, task_type: str,
             timeout=hat_def.get("timeout_seconds", 300),
         )
         if not result["error"]:
-            fallback_used = candidate_model != model
             break
 
     elapsed = time.time() - start
+    fallback_used = not result["error"] and result["model"] != model
 
     report = {
         "hat_id": hat_id,
