@@ -123,9 +123,8 @@ jobs:
             python3 -c "
           import os, re
           def sanitize(value):
-              if not value:
-                  return ''
-              return re.sub(r'[\r\n]', ' ', value).strip()
+              text = str(value or '')
+              return re.sub(r'[\r\n]', ' ', text).strip()
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
               f.write(f\"prompt={sanitize(os.environ.get('INPUT_PROMPT', ''))}\n\")
               f.write(f\"hats={sanitize(os.environ.get('INPUT_HATS', ''))}\n\")
