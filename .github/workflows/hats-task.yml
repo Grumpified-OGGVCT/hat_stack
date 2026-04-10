@@ -110,21 +110,30 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             # workflow_dispatch inputs are controlled by the UI schema — safe
             echo "task=${{ inputs.task }}" >> "$GITHUB_OUTPUT"
-            echo "hats=${{ inputs.hats }}" >> "$GITHUB_OUTPUT"
-            echo "callback_repo=${{ inputs.callback_repo }}" >> "$GITHUB_OUTPUT"
-            echo "callback_pr=${{ inputs.callback_pr }}" >> "$GITHUB_OUTPUT"
-            echo "callback_issue=${{ inputs.callback_issue }}" >> "$GITHUB_OUTPUT"
-            echo "category=${{ inputs.category }}" >> "$GITHUB_OUTPUT"
-            echo "genre=${{ inputs.genre }}" >> "$GITHUB_OUTPUT"
-            echo "project=${{ inputs.project }}" >> "$GITHUB_OUTPUT"
-            echo "workspace_root=${{ inputs.workspace_root }}" >> "$GITHUB_OUTPUT"
-            # Prompt may contain special chars — pass via env to avoid code injection
-            INPUT_PROMPT="${{ inputs.prompt }}" python3 -c "
+            # String inputs may contain newlines — sanitize before writing outputs
+            INPUT_PROMPT="${{ inputs.prompt }}" \
+            INPUT_HATS="${{ inputs.hats }}" \
+            INPUT_CALLBACK_REPO="${{ inputs.callback_repo }}" \
+            INPUT_CALLBACK_PR="${{ inputs.callback_pr }}" \
+            INPUT_CALLBACK_ISSUE="${{ inputs.callback_issue }}" \
+            INPUT_CATEGORY="${{ inputs.category }}" \
+            INPUT_GENRE="${{ inputs.genre }}" \
+            INPUT_PROJECT="${{ inputs.project }}" \
+            INPUT_WORKSPACE_ROOT="${{ inputs.workspace_root }}" \
+            python3 -c "
           import os, re
-          val = os.environ.get('INPUT_PROMPT', '')
-          sanitized = re.sub(r'[\r\n]', ' ', val).strip()
+          def sanitize(value):
+              return re.sub(r'[\r\n]', ' ', value).strip()
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-              f.write(f'prompt={sanitized}\n')
+              f.write(f\"prompt={sanitize(os.environ.get('INPUT_PROMPT', ''))}\n\")
+              f.write(f\"hats={sanitize(os.environ.get('INPUT_HATS', ''))}\n\")
+              f.write(f\"callback_repo={sanitize(os.environ.get('INPUT_CALLBACK_REPO', ''))}\n\")
+              f.write(f\"callback_pr={sanitize(os.environ.get('INPUT_CALLBACK_PR', ''))}\n\")
+              f.write(f\"callback_issue={sanitize(os.environ.get('INPUT_CALLBACK_ISSUE', ''))}\n\")
+              f.write(f\"category={sanitize(os.environ.get('INPUT_CATEGORY', ''))}\n\")
+              f.write(f\"genre={sanitize(os.environ.get('INPUT_GENRE', ''))}\n\")
+              f.write(f\"project={sanitize(os.environ.get('INPUT_PROJECT', ''))}\n\")
+              f.write(f\"workspace_root={sanitize(os.environ.get('INPUT_WORKSPACE_ROOT', ''))}\n\")
           "
           else
             # repository_dispatch — extract from client_payload with sanitization

@@ -164,7 +164,7 @@ def infer_project_slug(source_repo: str | None, task_type: str) -> str:
 
 
 def build_run_id(explicit_run_id: str | None = None) -> str:
-    """Build a deterministic run id for workspace storage."""
+    """Build a run id for workspace storage, preferring GitHub run metadata when available."""
     if explicit_run_id:
         return slugify_path_component(explicit_run_id, "run")
 
@@ -282,7 +282,7 @@ def build_run_manifest(
     return {
         "schema_version": 1,
         "created_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "status": "completed",
+        "status": task_result.get("status", "completed"),
         "task_type": task_result["task_type"],
         "prompt": prompt,
         "requested_hats": requested_hats or [],
@@ -316,7 +316,10 @@ def write_workspace_indexes(workspace_root: Path):
 
         for genre_dir in sorted(p for p in category_dir.iterdir() if p.is_dir()):
             for project_dir in sorted(p for p in genre_dir.iterdir() if p.is_dir()):
-                runs = sorted(p for p in project_dir.iterdir() if p.is_dir())
+                runs = sorted(
+                    (p for p in project_dir.iterdir() if p.is_dir()),
+                    key=lambda path: (path.stat().st_mtime, path.name),
+                )
                 if not runs:
                     continue
                 latest = runs[-1]
@@ -347,7 +350,7 @@ def write_workspace_indexes(workspace_root: Path):
             root_lines.append(f"| {category_name} | {project_count} |")
         root_lines.append("")
         root_lines.append(
-            "Folder layout: `playground/<category>/<genre>/<project>/<run-id>/`"
+            f"Folder layout: `{workspace_root}/<category>/<genre>/<project>/<run-id>/`"
         )
     else:
         root_lines.append("_No playground runs yet._")
@@ -692,8 +695,18 @@ def run_task_pipeline(config: dict, task_type: str, user_prompt: str,
         total_tokens["input"] += r["token_usage"]["input"]
         total_tokens["output"] += r["token_usage"]["output"]
 
+    primary_failed = bool(primary_result["error"]) and not primary_result["files"]
+    had_any_errors = any(result["error"] for result in all_results)
+    if primary_failed:
+        status = "failed"
+    elif had_any_errors:
+        status = "completed_with_warnings"
+    else:
+        status = "completed"
+
     return {
         "task_type": task_type,
+        "status": status,
         "primary_hat": primary_hat,
         "files": primary_result["files"],
         "summary": primary_result["summary"],
