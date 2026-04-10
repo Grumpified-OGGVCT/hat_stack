@@ -7,11 +7,14 @@
 # Usage from another repo:
 #   jobs:
 #     hats-review:
-#       uses: YOUR_USERNAME/hat_stack/.github/workflows/hats-review.yml@main
+#       uses: <your-fork>/hat_stack/.github/workflows/hats-review.yml@main
 #       with:
 #         diff_artifact: pr-diff  # or: diff: ${{ steps.get-diff.outputs.diff }}
 #       secrets:
 #         ollama_api_key: ${{ secrets.OLLAMA_API_KEY }}
+#
+# Note: The workflow auto-detects the repository via ${{ github.repository }},
+# so forks work without modifying this file.
 
 name: "🎩 Hats Team Review"
 
@@ -109,11 +112,18 @@ jobs:
 
           # Priority: 1) artifact, 2) inline diff
           if [ -d "/tmp/hats-artifact-diff" ]; then
-            # Find the first .diff or .patch file in the downloaded artifact
-            FOUND=$(find /tmp/hats-artifact-diff -type f \( -name "*.diff" -o -name "*.patch" \) | head -1)
+            # Find the first .diff or .patch file in the downloaded artifact (null-safe)
+            FOUND=""
+            while IFS= read -r -d '' fpath; do
+              FOUND="$fpath"
+              break
+            done < <(find /tmp/hats-artifact-diff -type f \( -name "*.diff" -o -name "*.patch" \) -print0)
             if [ -z "$FOUND" ]; then
               # Fall back to first file
-              FOUND=$(find /tmp/hats-artifact-diff -type f | head -1)
+              while IFS= read -r -d '' fpath; do
+                FOUND="$fpath"
+                break
+              done < <(find /tmp/hats-artifact-diff -type f -print0)
             fi
             if [ -n "$FOUND" ]; then
               cp "$FOUND" "$DIFF_FILE"
