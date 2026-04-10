@@ -32,7 +32,9 @@ Environment:
 import argparse
 import json
 import os
+import re
 import sys
+import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -89,6 +91,15 @@ TASK_PROFILES = {
     },
 }
 
+DEFAULT_CATEGORIES = {
+    "generate_code": "code",
+    "generate_docs": "docs",
+    "refactor": "code",
+    "analyze": "analysis",
+    "plan": "plans",
+    "test": "tests",
+}
+
 # ---------------------------------------------------------------------------
 # Task-mode system prompts — transform hats from reviewers to builders
 # ---------------------------------------------------------------------------
@@ -134,6 +145,220 @@ def load_config(config_path: str | Path) -> dict:
     """Load hat configuration from YAML file."""
     with open(config_path, "r", encoding="utf-8") as fh:
         return yaml.safe_load(fh)
+
+
+def slugify_path_component(value: str | None, default: str) -> str:
+    """Normalize workspace path components for predictable human-readable folders."""
+    text = (value or "").strip().lower()
+    text = re.sub(r"[^a-z0-9._-]+", "-", text)
+    text = re.sub(r"-{2,}", "-", text).strip(".-")
+    return text or default
+
+
+def infer_project_slug(source_repo: str | None, task_type: str) -> str:
+    """Choose a stable project folder name."""
+    if source_repo:
+        repo_name = source_repo.rsplit("/", 1)[-1]
+        return slugify_path_component(repo_name, "project")
+    return slugify_path_component(task_type, "adhoc")
+
+
+def build_run_id(explicit_run_id: str | None = None) -> str:
+    """Build a run id for workspace storage, preferring GitHub run metadata when available."""
+    if explicit_run_id:
+        return slugify_path_component(explicit_run_id, "run")
+
+    github_run_id = os.environ.get("GITHUB_RUN_ID", "").strip()
+    github_attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "").strip()
+    if github_run_id:
+        attempt_suffix = f"-attempt-{github_attempt}" if github_attempt else ""
+        return f"run-{slugify_path_component(github_run_id, 'run')}{attempt_suffix}"
+
+    return time.strftime("run-%Y%m%d-%H%M%S", time.gmtime())
+
+
+def resolve_workspace_root(workspace_root: str | None) -> Path | None:
+    """Resolve and validate the optional workspace root."""
+    if not workspace_root:
+        return None
+    return Path(workspace_root).expanduser().resolve()
+
+
+def ensure_path_within_root(root: Path, candidate: Path) -> Path:
+    """Ensure candidate resolves inside the declared sandbox root."""
+    resolved = candidate.resolve()
+    try:
+        resolved.relative_to(root)
+    except ValueError as exc:
+        raise ValueError(f"Path escapes sandbox root: {candidate}") from exc
+    return resolved
+
+
+def safe_output_path(output_dir: Path, relative_path: str) -> Path:
+    """Return a safe output path within the output directory."""
+    if not relative_path.strip():
+        raise ValueError("Empty file path is not allowed")
+    rel = Path(relative_path)
+    if rel.is_absolute():
+        raise ValueError(f"Unsafe generated file path: {relative_path!r}")
+    if any(part == ".." for part in rel.parts):
+        raise ValueError(f"Unsafe generated file path: {relative_path!r}")
+    return ensure_path_within_root(output_dir.resolve(), output_dir / rel)
+
+
+def prepare_workspace(
+    task_type: str,
+    workspace_root: str | None = None,
+    category: str | None = None,
+    genre: str | None = None,
+    project: str | None = None,
+    run_id: str | None = None,
+    source_repo: str | None = None,
+    explicit_output_dir: str | None = None,
+) -> dict:
+    """Prepare sandbox workspace metadata and return resolved output path."""
+    resolved_workspace_root = resolve_workspace_root(workspace_root)
+    if not resolved_workspace_root:
+        default_output_dir = (
+            Path(tempfile.gettempdir())
+            / f"hats-task-output-{build_run_id()}-{os.getpid()}"
+        )
+        output_dir = Path(explicit_output_dir or default_output_dir).expanduser().resolve()
+        output_dir.mkdir(parents=True, exist_ok=True)
+        return {
+            "workspace_root": None,
+            "output_dir": output_dir,
+            "category": None,
+            "genre": None,
+            "project": None,
+            "run_id": None,
+        }
+
+    normalized_category = slugify_path_component(
+        category, DEFAULT_CATEGORIES.get(task_type, "misc")
+    )
+    normalized_genre = slugify_path_component(genre, "general")
+    normalized_project = slugify_path_component(
+        project, infer_project_slug(source_repo, task_type)
+    )
+    normalized_run_id = build_run_id(run_id)
+
+    output_dir = ensure_path_within_root(
+        resolved_workspace_root,
+        resolved_workspace_root / normalized_category / normalized_genre / normalized_project / normalized_run_id,
+    )
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    return {
+        "workspace_root": resolved_workspace_root,
+        "output_dir": output_dir,
+        "category": normalized_category,
+        "genre": normalized_genre,
+        "project": normalized_project,
+        "run_id": normalized_run_id,
+    }
+
+
+def build_run_manifest(
+    task_result: dict,
+    prompt: str,
+    requested_hats: list[str] | None,
+    source_repo: str | None,
+    source_pr: str | None,
+    source_issue: str | None,
+    workspace_info: dict,
+) -> dict:
+    """Build manifest metadata for a sandboxed task run."""
+    output_dir = workspace_info["output_dir"]
+    files = [
+        {
+            "path": entry["path"],
+            "description": entry.get("description", ""),
+            "absolute_path": str((output_dir / entry["path"]).resolve()),
+        }
+        for entry in task_result.get("files", [])
+    ]
+
+    return {
+        "schema_version": 1,
+        "created_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "status": task_result.get("status", "completed"),
+        "task_type": task_result["task_type"],
+        "prompt": prompt,
+        "requested_hats": requested_hats or [],
+        "primary_hat": task_result["primary_hat"],
+        "summary": task_result["summary"],
+        "notes": task_result.get("notes", []),
+        "source": {
+            "repo": source_repo or "",
+            "pr": source_pr or "",
+            "issue": source_issue or "",
+        },
+        "workspace": {
+            "root": str(workspace_info["workspace_root"]) if workspace_info["workspace_root"] else "",
+            "category": workspace_info["category"] or "",
+            "genre": workspace_info["genre"] or "",
+            "project": workspace_info["project"] or "",
+            "run_id": workspace_info["run_id"] or "",
+            "output_dir": str(output_dir),
+        },
+        "generated_files": files,
+        "stats": task_result.get("stats", {}),
+    }
+
+
+def write_workspace_indexes(workspace_root: Path):
+    """Write human-readable indexes for the sandbox workspace."""
+    categories = []
+    for category_dir in sorted(p for p in workspace_root.iterdir() if p.is_dir()):
+        category_lines = [f"# {category_dir.name} playground index", ""]
+        category_projects = []
+
+        for genre_dir in sorted(p for p in category_dir.iterdir() if p.is_dir()):
+            for project_dir in sorted(p for p in genre_dir.iterdir() if p.is_dir()):
+                runs = sorted(
+                    (p for p in project_dir.iterdir() if p.is_dir()),
+                    key=lambda path: (path.stat().st_mtime, path.name),
+                )
+                if not runs:
+                    continue
+                latest = runs[-1]
+                category_projects.append((genre_dir.name, project_dir.name, latest.name, len(runs)))
+
+        if category_projects:
+            category_lines.append("| Genre | Project | Latest Run | Runs |")
+            category_lines.append("|-------|---------|------------|------|")
+            for genre_name, project_name, latest_run, run_count in category_projects:
+                category_lines.append(
+                    f"| {genre_name} | {project_name} | `{latest_run}` | {run_count} |"
+                )
+            category_lines.append("")
+        else:
+            category_lines.append("_No projects yet._")
+            category_lines.append("")
+
+        (category_dir / "CATEGORY_INDEX.md").write_text(
+            "\n".join(category_lines), encoding="utf-8"
+        )
+        categories.append((category_dir.name, len(category_projects)))
+
+    root_lines = ["# Hats Playground Index", ""]
+    if categories:
+        root_lines.append("| Category | Projects |")
+        root_lines.append("|----------|----------|")
+        for category_name, project_count in categories:
+            root_lines.append(f"| {category_name} | {project_count} |")
+        root_lines.append("")
+        root_lines.append(
+            f"Folder layout: `{workspace_root}/<category>/<genre>/<project>/<run-id>/`"
+        )
+    else:
+        root_lines.append("_No playground runs yet._")
+    root_lines.append("")
+
+    (workspace_root / "PLAYGROUND_INDEX.md").write_text(
+        "\n".join(root_lines), encoding="utf-8"
+    )
 
 
 def call_ollama(config: dict, model: str, system_prompt: str, user_prompt: str,
@@ -214,6 +439,42 @@ def select_model_for_task(config: dict, hat_id: str, task_type: str) -> str:
     return hat_def.get("primary_model", "nemotron-3-super")
 
 
+def build_comparable_model_sequence(
+    config: dict,
+    primary_model: str,
+    fallback_model: str | None = None,
+) -> list[str]:
+    """Build a prioritized model fallback list using comparable configured tiers."""
+    models_cfg = config.get("models", {})
+    seen = set()
+    ordered_models = []
+
+    def add(model_name: str | None):
+        if model_name and model_name in models_cfg and model_name not in seen:
+            ordered_models.append(model_name)
+            seen.add(model_name)
+
+    add(primary_model)
+    add(fallback_model)
+
+    primary_tier = models_cfg.get(primary_model, {}).get("tier")
+    fallback_tier = models_cfg.get(fallback_model, {}).get("tier") if fallback_model else None
+
+    for model_name, model_meta in models_cfg.items():
+        if model_meta.get("tier") == primary_tier:
+            add(model_name)
+
+    if fallback_tier and fallback_tier != primary_tier:
+        for model_name, model_meta in models_cfg.items():
+            if model_meta.get("tier") == fallback_tier:
+                add(model_name)
+
+    for model_name in models_cfg:
+        add(model_name)
+
+    return ordered_models
+
+
 def build_task_prompt(config: dict, hat_id: str, task_type: str,
                       user_prompt: str, context_files: dict | None = None) -> tuple[str, str]:
     """Build the system and user prompts for a task execution.
@@ -252,29 +513,35 @@ def run_task_hat(config: dict, hat_id: str, task_type: str,
     )
 
     start = time.time()
-    result = call_ollama(
-        config, model, system_prompt, full_user_prompt,
-        temperature=hat_def.get("temperature", 0.3),
-        max_tokens=8192,  # Task mode needs more output room
-        timeout=hat_def.get("timeout_seconds", 300),
-    )
-    elapsed = time.time() - start
-
-    # Try fallback if primary fails
-    if result["error"] and hat_def.get("fallback_model"):
+    attempted_models = []
+    result = {
+        "error": "All model attempts failed",
+        "model": model,
+        "content": None,
+        "usage": {"input": 0, "output": 0},
+    }
+    for candidate_model in build_comparable_model_sequence(
+        config, model, hat_def.get("fallback_model")
+    ):
+        attempted_models.append(candidate_model)
         result = call_ollama(
-            config, hat_def["fallback_model"], system_prompt, full_user_prompt,
+            config, candidate_model, system_prompt, full_user_prompt,
             temperature=hat_def.get("temperature", 0.3),
-            max_tokens=8192,
+            max_tokens=8192,  # Task mode needs more output room
             timeout=hat_def.get("timeout_seconds", 300),
         )
-        elapsed = time.time() - start
+        if not result["error"]:
+            break
+
+    elapsed = time.time() - start
+    fallback_used = not result["error"] and result["model"] != model
 
     report = {
         "hat_id": hat_id,
         "hat_name": hat_def.get("name", hat_id),
         "emoji": hat_def.get("emoji", "🎩"),
         "model_used": result["model"],
+        "attempted_models": attempted_models,
         "latency_seconds": round(elapsed, 2),
         "token_usage": result["usage"],
         "error": result["error"],
@@ -297,6 +564,11 @@ def run_task_hat(config: dict, hat_id: str, task_type: str,
                 "description": "Raw model output (JSON parsing failed)",
             }]
             report["summary"] = "Model returned unstructured output"
+
+    if fallback_used:
+        report["notes"].append(
+            f"Primary model fallback used: {attempted_models[0]} → {report['model_used']}"
+        )
 
     return report
 
@@ -423,8 +695,20 @@ def run_task_pipeline(config: dict, task_type: str, user_prompt: str,
         total_tokens["input"] += r["token_usage"]["input"]
         total_tokens["output"] += r["token_usage"]["output"]
 
+    # Treat the task as failed only when the primary generation failed outright;
+    # supporting/gold hat errors should surface as warnings if deliverables still exist.
+    primary_failed = primary_result["error"] and not primary_result["files"]
+    had_any_errors = any(result["error"] for result in all_results)
+    if primary_failed:
+        status = "failed"
+    elif had_any_errors:
+        status = "completed_with_warnings"
+    else:
+        status = "completed"
+
     return {
         "task_type": task_type,
+        "status": status,
         "primary_hat": primary_hat,
         "files": primary_result["files"],
         "summary": primary_result["summary"],
@@ -445,13 +729,22 @@ def run_task_pipeline(config: dict, task_type: str, user_prompt: str,
     }
 
 
-def write_output_files(task_result: dict, output_dir: str):
+def write_output_files(
+    task_result: dict,
+    output_dir: str | Path,
+    workspace_info: dict | None = None,
+    prompt: str = "",
+    requested_hats: list[str] | None = None,
+    source_repo: str | None = None,
+    source_pr: str | None = None,
+    source_issue: str | None = None,
+):
     """Write generated files to the output directory."""
-    out = Path(output_dir)
+    out = Path(output_dir).resolve()
     out.mkdir(parents=True, exist_ok=True)
 
     for file_entry in task_result.get("files", []):
-        filepath = out / file_entry["path"]
+        filepath = safe_output_path(out, file_entry["path"])
         filepath.parent.mkdir(parents=True, exist_ok=True)
         filepath.write_text(file_entry["content"], encoding="utf-8")
         print(f"  📄 {filepath}", file=sys.stderr)
@@ -486,6 +779,21 @@ def write_output_files(task_result: dict, output_dir: str):
     json_path = out / "hats_task_result.json"
     json_path.write_text(json.dumps(task_result, indent=2), encoding="utf-8")
     print(f"  📊 {json_path}", file=sys.stderr)
+
+    if workspace_info and workspace_info.get("workspace_root"):
+        manifest = build_run_manifest(
+            task_result,
+            prompt=prompt,
+            requested_hats=requested_hats,
+            source_repo=source_repo,
+            source_pr=source_pr,
+            source_issue=source_issue,
+            workspace_info=workspace_info,
+        )
+        manifest_path = out / "PLAYGROUND_MANIFEST.json"
+        manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+        print(f"  🗂️ {manifest_path}", file=sys.stderr)
+        write_workspace_indexes(workspace_info["workspace_root"])
 
 
 # ---------------------------------------------------------------------------
@@ -525,8 +833,60 @@ def main():
         "--json-file", default=None,
         help="Path to write JSON result (in addition to output dir)"
     )
+    parser.add_argument(
+        "--workspace-root", default=None,
+        help="Optional sandbox root for structured playground storage"
+    )
+    parser.add_argument(
+        "--category", default=None,
+        help="Optional playground category (default: inferred from task type)"
+    )
+    parser.add_argument(
+        "--genre", default=None,
+        help="Optional playground genre/type bucket"
+    )
+    parser.add_argument(
+        "--project", default=None,
+        help="Optional playground project slug"
+    )
+    parser.add_argument(
+        "--run-id", default=None,
+        help="Optional run id folder name inside the playground project"
+    )
+    parser.add_argument(
+        "--source-repo", default=None,
+        help="Source repo for manifest metadata"
+    )
+    parser.add_argument(
+        "--source-pr", default=None,
+        help="Source PR number for manifest metadata"
+    )
+    parser.add_argument(
+        "--source-issue", default=None,
+        help="Source issue number for manifest metadata"
+    )
 
     args = parser.parse_args()
+
+    workspace_info = prepare_workspace(
+        task_type=args.task,
+        workspace_root=args.workspace_root,
+        category=args.category,
+        genre=args.genre,
+        project=args.project,
+        run_id=args.run_id,
+        source_repo=args.source_repo,
+        explicit_output_dir=args.output,
+    )
+    output_dir = workspace_info["output_dir"]
+
+    github_output = os.environ.get("GITHUB_OUTPUT")
+    if github_output:
+        with open(github_output, "a", encoding="utf-8") as fh:
+            fh.write(f"output_dir={output_dir}\n")
+            fh.write(
+                f"workspace_root={workspace_info['workspace_root'] or ''}\n"
+            )
 
     # Preflight
     api_key = os.environ.get("OLLAMA_API_KEY", "").strip()
@@ -554,7 +914,7 @@ def main():
 
     requested_hats = None
     if args.hats:
-        requested_hats = [h.strip() for h in args.hats.split(",")]
+        requested_hats = [h.strip() for h in args.hats.split(",") if h.strip()]
 
     # Run the task
     result = run_task_pipeline(
@@ -564,21 +924,28 @@ def main():
     )
 
     # Write outputs
-    print(f"\n📦 Writing output to {args.output}/", file=sys.stderr)
-    write_output_files(result, args.output)
+    print(f"\n📦 Writing output to {output_dir}/", file=sys.stderr)
+    write_output_files(
+        result,
+        output_dir,
+        workspace_info=workspace_info,
+        prompt=args.prompt,
+        requested_hats=requested_hats,
+        source_repo=args.source_repo,
+        source_pr=args.source_pr,
+        source_issue=args.source_issue,
+    )
 
     if args.json_file:
         with open(args.json_file, "w", encoding="utf-8") as fh:
             json.dump(result, fh, indent=2)
 
     # GitHub Actions outputs
-    github_output = os.environ.get("GITHUB_OUTPUT")
     if github_output:
         with open(github_output, "a", encoding="utf-8") as fh:
             fh.write(f"task_type={result['task_type']}\n")
             fh.write(f"files_generated={len(result['files'])}\n")
             fh.write(f"hats_executed={result['stats']['hats_executed']}\n")
-            fh.write(f"output_dir={args.output}\n")
 
     print(f"\n✅ Task complete: {len(result['files'])} files generated, "
           f"{result['stats']['hats_executed']} hats used", file=sys.stderr)

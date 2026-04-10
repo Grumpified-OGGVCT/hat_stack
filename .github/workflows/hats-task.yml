@@ -61,6 +61,26 @@ on:
         required: false
         type: string
         default: ""
+      category:
+        description: "Playground category (default: inferred from task type)"
+        required: false
+        type: string
+        default: ""
+      genre:
+        description: "Playground genre/type bucket"
+        required: false
+        type: string
+        default: ""
+      project:
+        description: "Playground project slug"
+        required: false
+        type: string
+        default: ""
+      workspace_root:
+        description: "Sandbox workspace root on the runner"
+        required: false
+        type: string
+        default: "/tmp/hats-playground"
 
 permissions:
   contents: read
@@ -90,17 +110,31 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             # workflow_dispatch inputs are controlled by the UI schema — safe
             echo "task=${{ inputs.task }}" >> "$GITHUB_OUTPUT"
-            echo "hats=${{ inputs.hats }}" >> "$GITHUB_OUTPUT"
-            echo "callback_repo=${{ inputs.callback_repo }}" >> "$GITHUB_OUTPUT"
-            echo "callback_pr=${{ inputs.callback_pr }}" >> "$GITHUB_OUTPUT"
-            echo "callback_issue=${{ inputs.callback_issue }}" >> "$GITHUB_OUTPUT"
-            # Prompt may contain special chars — pass via env to avoid code injection
-            INPUT_PROMPT="${{ inputs.prompt }}" python3 -c "
+            # String inputs may contain newlines — sanitize before writing outputs
+            INPUT_PROMPT="${{ inputs.prompt }}" \
+            INPUT_HATS="${{ inputs.hats }}" \
+            INPUT_CALLBACK_REPO="${{ inputs.callback_repo }}" \
+            INPUT_CALLBACK_PR="${{ inputs.callback_pr }}" \
+            INPUT_CALLBACK_ISSUE="${{ inputs.callback_issue }}" \
+            INPUT_CATEGORY="${{ inputs.category }}" \
+            INPUT_GENRE="${{ inputs.genre }}" \
+            INPUT_PROJECT="${{ inputs.project }}" \
+            INPUT_WORKSPACE_ROOT="${{ inputs.workspace_root }}" \
+            python3 -c "
           import os, re
-          val = os.environ.get('INPUT_PROMPT', '')
-          sanitized = re.sub(r'[\r\n]', ' ', val).strip()
+          def sanitize(value):
+              text = str(value or '')
+              return re.sub(r'[\r\n]', ' ', text).strip()
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-              f.write(f'prompt={sanitized}\n')
+              f.write(f\"prompt={sanitize(os.environ.get('INPUT_PROMPT', ''))}\n\")
+              f.write(f\"hats={sanitize(os.environ.get('INPUT_HATS', ''))}\n\")
+              f.write(f\"callback_repo={sanitize(os.environ.get('INPUT_CALLBACK_REPO', ''))}\n\")
+              f.write(f\"callback_pr={sanitize(os.environ.get('INPUT_CALLBACK_PR', ''))}\n\")
+              f.write(f\"callback_issue={sanitize(os.environ.get('INPUT_CALLBACK_ISSUE', ''))}\n\")
+              f.write(f\"category={sanitize(os.environ.get('INPUT_CATEGORY', ''))}\n\")
+              f.write(f\"genre={sanitize(os.environ.get('INPUT_GENRE', ''))}\n\")
+              f.write(f\"project={sanitize(os.environ.get('INPUT_PROJECT', ''))}\n\")
+              f.write(f\"workspace_root={sanitize(os.environ.get('INPUT_WORKSPACE_ROOT', ''))}\n\")
           "
           else
             # repository_dispatch — extract from client_payload with sanitization
@@ -126,6 +160,10 @@ jobs:
               f.write(f\"callback_repo={sanitize(payload.get('callback_repo', ''))}\n\")
               f.write(f\"callback_pr={sanitize(payload.get('callback_pr', ''))}\n\")
               f.write(f\"callback_issue={sanitize(payload.get('callback_issue', ''))}\n\")
+              f.write(f\"category={sanitize(payload.get('category', ''))}\n\")
+              f.write(f\"genre={sanitize(payload.get('genre', ''))}\n\")
+              f.write(f\"project={sanitize(payload.get('project', ''))}\n\")
+              f.write(f\"workspace_root={sanitize(payload.get('workspace_root', '/tmp/hats-playground'))}\n\")
               f.write(f\"context={sanitize(payload.get('context', ''))}\n\")
           "
           fi
@@ -175,12 +213,27 @@ jobs:
             --task "${{ steps.params.outputs.task }}"
             --prompt "${{ steps.params.outputs.prompt }}"
             --config scripts/hat_configs.yml
-            --output /tmp/hats-task-output
             --json-file /tmp/hats-task-result.json
+            --workspace-root "${{ steps.params.outputs.workspace_root }}"
+            --source-repo "${{ steps.params.outputs.callback_repo }}"
+            --source-pr "${{ steps.params.outputs.callback_pr }}"
+            --source-issue "${{ steps.params.outputs.callback_issue }}"
           )
 
           if [ -n "${{ steps.params.outputs.hats }}" ]; then
             ARGS+=(--hats "${{ steps.params.outputs.hats }}")
+          fi
+
+          if [ -n "${{ steps.params.outputs.category }}" ]; then
+            ARGS+=(--category "${{ steps.params.outputs.category }}")
+          fi
+
+          if [ -n "${{ steps.params.outputs.genre }}" ]; then
+            ARGS+=(--genre "${{ steps.params.outputs.genre }}")
+          fi
+
+          if [ -n "${{ steps.params.outputs.project }}" ]; then
+            ARGS+=(--project "${{ steps.params.outputs.project }}")
           fi
 
           if [ -d "/tmp/hats-context" ] && [ "$(ls -A /tmp/hats-context 2>/dev/null)" ]; then
@@ -211,6 +264,7 @@ jobs:
           CALLBACK_PR="${{ steps.params.outputs.callback_pr }}"
           CALLBACK_ISSUE="${{ steps.params.outputs.callback_issue }}"
           TARGET="${CALLBACK_PR:-$CALLBACK_ISSUE}"
+          OUTPUT_DIR="${{ steps.run.outputs.output_dir }}"
 
           if [ -z "$GH_TOKEN" ] || [ -z "$TARGET" ]; then
             echo "⚠️ Cannot post results — missing token or target"
@@ -218,8 +272,8 @@ jobs:
           fi
 
           # Build comment from summary
-          if [ -f /tmp/hats-task-output/HATS_TASK_SUMMARY.md ]; then
-            REPORT_BODY=$(cat /tmp/hats-task-output/HATS_TASK_SUMMARY.md)
+          if [ -n "$OUTPUT_DIR" ] && [ -f "$OUTPUT_DIR/HATS_TASK_SUMMARY.md" ]; then
+            REPORT_BODY=$(cat "$OUTPUT_DIR/HATS_TASK_SUMMARY.md")
           else
             REPORT_BODY="🎩 Hats Task completed. Files generated: ${{ steps.run.outputs.files_generated }}"
           fi
@@ -241,7 +295,15 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: hats-task-output
-          path: /tmp/hats-task-output/
+          path: ${{ steps.run.outputs.output_dir }}/
+          retention-days: 30
+
+      - name: Upload playground workspace
+        if: always() && steps.run.outputs.workspace_root != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: hats-playground
+          path: ${{ steps.run.outputs.workspace_root }}/
           retention-days: 30
 
       - name: Upload JSON result
