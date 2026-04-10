@@ -196,8 +196,10 @@ def ensure_path_within_root(root: Path, candidate: Path) -> Path:
 
 def safe_output_path(output_dir: Path, relative_path: str) -> Path:
     """Return a safe output path within the output directory."""
+    if not relative_path.strip():
+        raise ValueError(f"Unsafe generated file path: {relative_path!r}")
     rel = Path(relative_path)
-    if rel.is_absolute() or not relative_path.strip():
+    if rel.is_absolute():
         raise ValueError(f"Unsafe generated file path: {relative_path!r}")
     if any(part == ".." for part in rel.parts):
         raise ValueError(f"Unsafe generated file path: {relative_path!r}")
@@ -509,6 +511,7 @@ def run_task_hat(config: dict, hat_id: str, task_type: str,
 
     start = time.time()
     attempted_models = []
+    fallback_used = False
     result = {
         "error": "All model attempts failed",
         "model": model,
@@ -526,6 +529,7 @@ def run_task_hat(config: dict, hat_id: str, task_type: str,
             timeout=hat_def.get("timeout_seconds", 300),
         )
         if not result["error"]:
+            fallback_used = candidate_model != attempted_models[0]
             break
 
     elapsed = time.time() - start
@@ -559,8 +563,7 @@ def run_task_hat(config: dict, hat_id: str, task_type: str,
             }]
             report["summary"] = "Model returned unstructured output"
 
-    used_fallback_model = len(attempted_models) > 1 and attempted_models[0] != report["model_used"]
-    if used_fallback_model:
+    if fallback_used:
         report["notes"].append(
             f"Primary model fallback used: {attempted_models[0]} → {report['model_used']}"
         )
