@@ -34,6 +34,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -198,7 +199,7 @@ def safe_output_path(output_dir: Path, relative_path: str) -> Path:
     rel = Path(relative_path)
     if rel.is_absolute() or not relative_path.strip():
         raise ValueError(f"Unsafe generated file path: {relative_path!r}")
-    if any(part in ("..", "") for part in rel.parts):
+    if any(part == ".." for part in rel.parts):
         raise ValueError(f"Unsafe generated file path: {relative_path!r}")
     return ensure_path_within_root(output_dir.resolve(), output_dir / rel)
 
@@ -216,7 +217,12 @@ def prepare_workspace(
     """Prepare sandbox workspace metadata and return resolved output path."""
     resolved_workspace_root = resolve_workspace_root(workspace_root)
     if not resolved_workspace_root:
-        output_dir = Path(explicit_output_dir or "/tmp/hats-task-output").expanduser().resolve()
+        default_output_dir = (
+            Path(tempfile.gettempdir())
+            / f"hats-task-output-{build_run_id()}-{os.getpid()}"
+        )
+        output_dir = Path(explicit_output_dir or default_output_dir).expanduser().resolve()
+        output_dir.mkdir(parents=True, exist_ok=True)
         return {
             "workspace_root": None,
             "output_dir": output_dir,
@@ -504,7 +510,7 @@ def run_task_hat(config: dict, hat_id: str, task_type: str,
     start = time.time()
     attempted_models = []
     result = {
-        "error": "No model attempts executed",
+        "error": "All model attempts failed",
         "model": model,
         "content": None,
         "usage": {"input": 0, "output": 0},

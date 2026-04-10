@@ -155,8 +155,8 @@ jobs:
               f.write(f\"project={sanitize(payload.get('project', ''))}\n\")
               f.write(f\"workspace_root={sanitize(payload.get('workspace_root', '/tmp/hats-playground'))}\n\")
               f.write(f\"context={sanitize(payload.get('context', ''))}\n\")
-           "
-          fi
+          "
+           fi
 
       - name: Fetch context from callback repo
         id: context
