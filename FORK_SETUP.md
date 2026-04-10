@@ -179,7 +179,7 @@ export HAT_STACK_REPO="YOUR_USERNAME/hat_stack"
 ```bash
 # Generate a new code module — results posted as a PR comment
 hat task generate_code "Build a FastAPI auth module with JWT and refresh tokens" \
-  --repo myorg/myapp --pr 42
+  --repo myorg/myapp --pr 42 --category code --genre api --project auth-service
 
 # Write documentation for an endpoint
 hat task generate_docs "Write API documentation for the /users endpoints" \
@@ -187,7 +187,7 @@ hat task generate_docs "Write API documentation for the /users endpoints" \
 
 # Plan a migration
 hat task plan "Plan a migration from REST to GraphQL for the orders service" \
-  --repo myorg/myapp
+  --repo myorg/myapp --category plans --genre migration --project orders-service
 
 # Generate tests for a module
 hat task test "Write unit tests for auth.py covering edge cases and error paths" \
@@ -210,7 +210,24 @@ hat status
 3. The task runner selects the right hats and models for the job
 4. Primary hat generates the deliverable, supporting hats review/enhance it
 5. Gold Hat does final QA
-6. Results are posted back to your project's PR/issue as a comment
+6. Results are written into a sandboxed playground tree on the runner using `category/genre/project/run-id`
+7. Results are posted back to your project's PR/issue as a comment and uploaded as artifacts
+
+**Playground layout:**
+
+```text
+/tmp/hats-playground/
+└── <category>/
+    └── <genre>/
+        └── <project>/
+            └── <run-id>/
+                ├── generated files...
+                ├── HATS_TASK_SUMMARY.md
+                ├── hats_task_result.json
+                └── PLAYGROUND_MANIFEST.json
+```
+
+If you do not pass `--category`, `--genre`, or `--project`, Hat Stack infers sensible defaults and creates the folders automatically.
 
 **For Copilot in VS Code:** Your Copilot agent can shell out to `hat task ...` commands. The `gh` CLI handles auth, and hat_stack handles execution. Your Copilot agent gives the instruction, hat_stack's model pool does the heavy lifting, results come back to the PR.
 

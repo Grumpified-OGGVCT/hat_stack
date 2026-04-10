@@ -190,7 +190,8 @@ cp scripts/hat /usr/local/bin/hat   # or add scripts/ to PATH
 export HAT_STACK_REPO="YOUR_USERNAME/hat_stack"
 
 # Generate code
-hat task generate_code "Build a FastAPI auth module with JWT" --repo myorg/app --pr 42
+hat task generate_code "Build a FastAPI auth module with JWT" \
+  --repo myorg/app --pr 42 --category code --genre api --project auth-service
 
 # Write documentation
 hat task generate_docs "Write API docs for /users endpoints" --repo myorg/app --issue 10
@@ -207,6 +208,13 @@ hat task analyze "Security audit of payment processing" --repo myorg/payments
 # Review a diff
 git diff main | hat review - --repo myorg/app --pr 123
 ```
+
+Task runs now support a structured playground sandbox on the runner:
+
+- Default workspace root: `/tmp/hats-playground`
+- Layout: `<workspace>/<category>/<genre>/<project>/<run-id>/`
+- Contents: generated files, `HATS_TASK_SUMMARY.md`, `hats_task_result.json`, `PLAYGROUND_MANIFEST.json`
+- Persistence: both the run output and the full playground tree are uploaded as workflow artifacts
 
 Or dispatch directly via `gh` CLI (what your Copilot agent would call):
 
@@ -275,4 +283,3 @@ hat_stack/
 ## License
 
 MIT — See [LICENSE](LICENSE).
-

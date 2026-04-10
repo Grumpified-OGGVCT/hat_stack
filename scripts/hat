@@ -9,7 +9,8 @@
 #
 # Usage:
 #   hat review <diff_file> [--repo owner/repo] [--pr 42]
-#   hat task <task_type> "<prompt>" [--repo owner/repo] [--pr 42] [--hats black,green]
+#   hat task <task_type> "<prompt>" [--repo owner/repo] [--pr 42] [--hats black,green] \
+#     [--category code] [--genre api] [--project auth-service]
 #   hat status [run_id]
 #   hat list-tasks
 #
@@ -19,7 +20,7 @@
 #
 #   # Generate a new module
 #   hat task generate_code "Build a FastAPI auth module with JWT and refresh tokens" \
-#     --repo myorg/myapp --pr 123
+#     --repo myorg/myapp --pr 123 --category code --genre api --project auth-service
 #
 #   # Write docs for an existing module
 #   hat task generate_docs "Write API documentation for the /users endpoints" \
@@ -174,6 +175,7 @@ cmd_task() {
   local task_type="$1"; shift
   local prompt="$1"; shift
   local callback_repo="" callback_pr="" callback_issue="" hats="" context=""
+  local category="" genre="" project=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -182,6 +184,9 @@ cmd_task() {
       --issue)   callback_issue="$2"; shift 2 ;;
       --hats)    hats="$2"; shift 2 ;;
       --context) context="$2"; shift 2 ;;
+      --category) category="$2"; shift 2 ;;
+      --genre)    genre="$2"; shift 2 ;;
+      --project)  project="$2"; shift 2 ;;
       *) die "Unknown option: $1" ;;
     esac
   done
@@ -199,6 +204,7 @@ cmd_task() {
   payload=$(HAT_TASK="$task_type" HAT_PROMPT="$prompt" \
     HAT_CB_REPO="$callback_repo" HAT_CB_PR="$callback_pr" \
     HAT_CB_ISSUE="$callback_issue" HAT_HATS="$hats" HAT_CTX="$context" \
+    HAT_CATEGORY="$category" HAT_GENRE="$genre" HAT_PROJECT="$project" \
     python3 -c "
 import json, os
 payload = {
@@ -209,6 +215,9 @@ payload = {
     'callback_issue': os.environ.get('HAT_CB_ISSUE', ''),
     'hats': os.environ.get('HAT_HATS', ''),
     'context': os.environ.get('HAT_CTX', ''),
+    'category': os.environ.get('HAT_CATEGORY', ''),
+    'genre': os.environ.get('HAT_GENRE', ''),
+    'project': os.environ.get('HAT_PROJECT', ''),
 }
 payload = {k: v for k, v in payload.items() if v}
 print(json.dumps(payload))
@@ -250,7 +259,7 @@ cmd_list_tasks() {
   echo ""
   echo -e "${BOLD}Usage:${NC}"
   echo '  hat task generate_code "Build a user auth module" --repo myorg/myapp --pr 42'
-  echo '  hat task plan "Plan migration to microservices" --repo myorg/monolith'
+  echo '  hat task plan "Plan migration to microservices" --repo myorg/monolith --category plans --genre migration --project orders'
 }
 
 cmd_help() {
@@ -269,10 +278,13 @@ cmd_help() {
   echo "  --issue <number>       Issue to post results to"
   echo "  --hats <hat1,hat2>     Specific hats to use"
   echo "  --context <text>       Additional context"
+  echo "  --category <name>      Playground category label"
+  echo "  --genre <name>         Playground genre/type label"
+  echo "  --project <name>       Playground project label"
   echo ""
   echo -e "${BOLD}Examples:${NC}"
   echo '  git diff main | hat review - --repo myorg/app --pr 42'
-  echo '  hat task generate_code "Build JWT auth module" --repo myorg/app --pr 42'
+  echo '  hat task generate_code "Build JWT auth module" --repo myorg/app --pr 42 --category code --genre api --project auth'
   echo '  hat task generate_docs "Write API docs for /users" --repo myorg/app --issue 10'
   echo '  hat task plan "Plan GraphQL migration" --repo myorg/app'
   echo '  hat task analyze "Security audit of payments" --repo myorg/payments'
