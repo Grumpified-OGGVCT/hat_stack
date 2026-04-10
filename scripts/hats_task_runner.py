@@ -559,7 +559,8 @@ def run_task_hat(config: dict, hat_id: str, task_type: str,
             }]
             report["summary"] = "Model returned unstructured output"
 
-    if len(attempted_models) > 1 and report["model_used"] != attempted_models[0]:
+    used_fallback_model = len(attempted_models) > 1 and attempted_models[0] != report["model_used"]
+    if used_fallback_model:
         report["notes"].append(
             f"Primary model fallback used: {attempted_models[0]} → {report['model_used']}"
         )
