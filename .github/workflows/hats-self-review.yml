@@ -44,16 +44,24 @@ jobs:
         env:
           OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
           OLLAMA_BASE_URL: ${{ secrets.OLLAMA_BASE_URL || 'https://api.ollama.ai/v1' }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
         shell: bash
         run: |
           set +e
-          python scripts/hats_runner.py \
-            --diff /tmp/pr-diff.patch \
-            --config scripts/hat_configs.yml \
-            --output both \
-            --markdown-file /tmp/hats-report.md \
-            --json-file /tmp/hats-report.json \
-            --context "Self-review of hat_stack PR #${{ github.event.pull_request.number }}: ${{ github.event.pull_request.title }}"
+          SANITIZED_PR_TITLE=$(printf '%s' "$PR_TITLE" | tr '\r\n' ' ' | tr '"' "'")
+          CONTEXT="Self-review of hat_stack PR #$PR_NUMBER: $SANITIZED_PR_TITLE"
+
+          cmd=(
+            python scripts/hats_runner.py
+            --diff /tmp/pr-diff.patch
+            --config scripts/hat_configs.yml
+            --output both
+            --markdown-file /tmp/hats-report.md
+            --json-file /tmp/hats-report.json
+            --context "$CONTEXT"
+          )
+          "${cmd[@]}"
           EXIT_CODE=$?
           set -e
 

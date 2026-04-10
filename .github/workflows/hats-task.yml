@@ -94,10 +94,10 @@ jobs:
             echo "callback_repo=${{ inputs.callback_repo }}" >> "$GITHUB_OUTPUT"
             echo "callback_pr=${{ inputs.callback_pr }}" >> "$GITHUB_OUTPUT"
             echo "callback_issue=${{ inputs.callback_issue }}" >> "$GITHUB_OUTPUT"
-            # Prompt may contain special chars — sanitize newlines
-            python3 -c "
+            # Prompt may contain special chars — pass via env to avoid code injection
+            INPUT_PROMPT="${{ inputs.prompt }}" python3 -c "
           import os, re
-          val = '''${{ inputs.prompt }}'''
+          val = os.environ.get('INPUT_PROMPT', '')
           sanitized = re.sub(r'[\r\n]', ' ', val).strip()
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
               f.write(f'prompt={sanitized}\n')
@@ -171,22 +171,24 @@ jobs:
           OLLAMA_BASE_URL: ${{ secrets.OLLAMA_BASE_URL || 'https://api.ollama.ai/v1' }}
         shell: bash
         run: |
-          ARGS="--task ${{ steps.params.outputs.task }}"
-          ARGS="$ARGS --prompt '${{ steps.params.outputs.prompt }}'"
-          ARGS="$ARGS --config scripts/hat_configs.yml"
-          ARGS="$ARGS --output /tmp/hats-task-output"
-          ARGS="$ARGS --json-file /tmp/hats-task-result.json"
+          ARGS=(
+            --task "${{ steps.params.outputs.task }}"
+            --prompt "${{ steps.params.outputs.prompt }}"
+            --config scripts/hat_configs.yml
+            --output /tmp/hats-task-output
+            --json-file /tmp/hats-task-result.json
+          )
 
           if [ -n "${{ steps.params.outputs.hats }}" ]; then
-            ARGS="$ARGS --hats ${{ steps.params.outputs.hats }}"
+            ARGS+=(--hats "${{ steps.params.outputs.hats }}")
           fi
 
           if [ -d "/tmp/hats-context" ] && [ "$(ls -A /tmp/hats-context 2>/dev/null)" ]; then
-            ARGS="$ARGS --context-dir /tmp/hats-context"
+            ARGS+=(--context-dir /tmp/hats-context)
           fi
 
           set +e
-          python scripts/hats_task_runner.py $ARGS
+          python scripts/hats_task_runner.py "${ARGS[@]}"
           EXIT_CODE=$?
           set -e
 

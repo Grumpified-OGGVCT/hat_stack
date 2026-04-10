@@ -141,9 +141,32 @@ Hat Stack runs **in GitHub** as a tool your other projects can call. It does two
 **Option A — Reusable Workflow** (recommended):
 ```yaml
 # In your other repo: .github/workflows/hats.yml
+name: "🎩 Hats Review"
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
 jobs:
+  get-diff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Generate diff
+        id: diff
+        run: |
+          git diff origin/${{ github.base_ref }}...HEAD > /tmp/pr.diff
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pr-diff
+          path: /tmp/pr.diff
+
   hats-review:
+    needs: get-diff
     uses: YOUR_USERNAME/hat_stack/.github/workflows/hats-review.yml@main
+    with:
+      diff_artifact: pr-diff
     secrets:
       ollama_api_key: ${{ secrets.OLLAMA_API_KEY }}
 ```

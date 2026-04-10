@@ -85,8 +85,6 @@ on:
 jobs:
   get-diff:
     runs-on: ubuntu-latest
-    outputs:
-      diff_file: ${{ steps.diff.outputs.diff_file }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -95,7 +93,6 @@ jobs:
         id: diff
         run: |
           git diff origin/${{ github.base_ref }}...HEAD > /tmp/pr.diff
-          echo "diff_file=/tmp/pr.diff" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         with:
           name: pr-diff
@@ -105,11 +102,15 @@ jobs:
     needs: get-diff
     # Point this to YOUR fork:
     uses: YOUR_USERNAME/hat_stack/.github/workflows/hats-review.yml@main
+    with:
+      diff_artifact: pr-diff
     secrets:
       ollama_api_key: ${{ secrets.OLLAMA_API_KEY }}
 ```
 
 > **Replace `YOUR_USERNAME`** with your GitHub username.
+> The `get-diff` job generates the diff and uploads it as an artifact.
+> The reusable workflow downloads and reviews it — no cross-workspace file paths needed.
 
 ### Option B: Composite Action
 
@@ -217,13 +218,9 @@ hat status
 
 ## Customizing Models
 
-The default model assignments follow the [Implementation Guide](hats/HATS_TEAM_IMPLEMENTATION_GUIDE.md) §E2.2. To customize:
+The default model assignments follow the [Implementation Guide](hats/HATS_TEAM_IMPLEMENTATION_GUIDE.md) §E2.2.
 
-1. **Quick override**: Set environment variables in your GitHub Secrets:
-   - `HATS_TIER1_MODEL=kimi-k2.5` (for security/safety/adjudication hats)
-   - `HATS_TIER2_MODEL=minimax-m2.7` (for architectural reasoning hats)
-
-2. **Full control**: Copy `scripts/hat_configs.yml` and modify model assignments per hat. Then set `config_override` in the reusable workflow call.
+**Supported customization method:** Copy `scripts/hat_configs.yml` and modify model assignments per hat. Then set `config_override` in the reusable workflow call or pass a custom config path to the `hat` CLI.
 
 ### Available Models (per the Implementation Guide)
 

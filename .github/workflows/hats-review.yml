@@ -7,9 +7,9 @@
 # Usage from another repo:
 #   jobs:
 #     hats-review:
-#       uses: Grumpified-OGGVCT/hat_stack/.github/workflows/hats-review.yml@main
+#       uses: YOUR_USERNAME/hat_stack/.github/workflows/hats-review.yml@main
 #       with:
-#         diff: ${{ steps.get-diff.outputs.diff }}
+#         diff_artifact: pr-diff  # or: diff: ${{ steps.get-diff.outputs.diff }}
 #       secrets:
 #         ollama_api_key: ${{ secrets.OLLAMA_API_KEY }}
 
@@ -19,12 +19,12 @@ on:
   workflow_call:
     inputs:
       diff:
-        description: "The diff text to review (for small diffs). Mutually exclusive with diff_file."
+        description: "The diff text to review (inline). This is the primary way to pass diffs."
         required: false
         type: string
         default: ""
-      diff_file:
-        description: "Path to a diff file in the calling repo's workspace (for large diffs)."
+      diff_artifact:
+        description: "Name of an uploaded artifact containing a diff file (for large diffs that exceed input limits). The artifact must contain a single .diff or .patch file."
         required: false
         type: string
         default: ""
@@ -48,11 +48,6 @@ on:
         required: false
         type: boolean
         default: false
-      config_override:
-        description: "Path to a custom hat_configs.yml in the calling repo (overrides default)."
-        required: false
-        type: string
-        default: ""
     outputs:
       verdict:
         description: "The final Hats verdict: ALLOW, ESCALATE, or QUARANTINE."
@@ -88,7 +83,7 @@ jobs:
       - name: Checkout hat_stack
         uses: actions/checkout@v4
         with:
-          repository: Grumpified-OGGVCT/hat_stack
+          repository: ${{ github.repository }}
           path: hat_stack
 
       - name: Set up Python
@@ -99,35 +94,41 @@ jobs:
       - name: Install dependencies
         run: pip install -r hat_stack/scripts/requirements.txt
 
+      - name: Download diff artifact
+        if: inputs.diff_artifact != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.diff_artifact }}
+          path: /tmp/hats-artifact-diff
+
       - name: Prepare diff input
         id: diff
         shell: bash
         run: |
           DIFF_FILE="/tmp/hats-diff.patch"
 
-          if [ -n "${{ inputs.diff_file }}" ] && [ -f "${{ inputs.diff_file }}" ]; then
-            cp "${{ inputs.diff_file }}" "$DIFF_FILE"
+          # Priority: 1) artifact, 2) inline diff
+          if [ -d "/tmp/hats-artifact-diff" ]; then
+            # Find the first .diff or .patch file in the downloaded artifact
+            FOUND=$(find /tmp/hats-artifact-diff -type f \( -name "*.diff" -o -name "*.patch" \) | head -1)
+            if [ -z "$FOUND" ]; then
+              # Fall back to first file
+              FOUND=$(find /tmp/hats-artifact-diff -type f | head -1)
+            fi
+            if [ -n "$FOUND" ]; then
+              cp "$FOUND" "$DIFF_FILE"
+            fi
           elif [ -n "${{ inputs.diff }}" ]; then
             cat <<'HATS_DIFF_EOF' > "$DIFF_FILE"
           ${{ inputs.diff }}
           HATS_DIFF_EOF
           else
-            echo "⚠️ No diff provided. Provide either 'diff' or 'diff_file' input." >&2
+            echo "⚠️ No diff provided. Provide either 'diff' (inline) or 'diff_artifact' (artifact name)." >&2
             echo "verdict=ALLOW" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           echo "diff_file=$DIFF_FILE" >> "$GITHUB_OUTPUT"
-
-      - name: Determine config
-        id: config
-        shell: bash
-        run: |
-          if [ -n "${{ inputs.config_override }}" ] && [ -f "${{ inputs.config_override }}" ]; then
-            echo "config_path=${{ inputs.config_override }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "config_path=hat_stack/scripts/hat_configs.yml" >> "$GITHUB_OUTPUT"
-          fi
 
       - name: Run Hats Pipeline
         id: run
@@ -136,23 +137,25 @@ jobs:
           OLLAMA_BASE_URL: ${{ secrets.ollama_base_url || 'https://api.ollama.ai/v1' }}
         shell: bash
         run: |
-          ARGS="--diff ${{ steps.diff.outputs.diff_file }}"
-          ARGS="$ARGS --config ${{ steps.config.outputs.config_path }}"
-          ARGS="$ARGS --output ${{ inputs.output_format }}"
-          ARGS="$ARGS --markdown-file /tmp/hats-report.md"
-          ARGS="$ARGS --json-file /tmp/hats-report.json"
+          ARGS=(
+            --diff "${{ steps.diff.outputs.diff_file }}"
+            --config "hat_stack/scripts/hat_configs.yml"
+            --output "${{ inputs.output_format }}"
+            --markdown-file /tmp/hats-report.md
+            --json-file /tmp/hats-report.json
+          )
 
           if [ -n "${{ inputs.hats }}" ]; then
-            ARGS="$ARGS --hats ${{ inputs.hats }}"
+            ARGS+=(--hats "${{ inputs.hats }}")
           fi
 
           if [ -n "${{ inputs.context }}" ]; then
-            ARGS="$ARGS --context '${{ inputs.context }}'"
+            ARGS+=(--context "${{ inputs.context }}")
           fi
 
           # Run the pipeline — capture exit code but don't fail yet
           set +e
-          python hat_stack/scripts/hats_runner.py $ARGS
+          python hat_stack/scripts/hats_runner.py "${ARGS[@]}"
           EXIT_CODE=$?
           set -e
 

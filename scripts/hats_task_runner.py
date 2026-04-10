@@ -187,16 +187,31 @@ def call_ollama(config: dict, model: str, system_prompt: str, user_prompt: str,
 
 
 def select_model_for_task(config: dict, hat_id: str, task_type: str) -> str:
-    """Select the best model for a task, using task tier as a guide."""
+    """Select the best model for a task, using task tier to pick model quality.
+
+    Tier 1 tasks (generate_code, analyze, refactor) use Tier 1 models (e.g. glm-5.1).
+    Tier 2+ tasks (generate_docs, plan, test) use the hat's assigned primary_model.
+    """
     hats_cfg = config["hats"]
     hat_def = hats_cfg.get(hat_id, {})
     profile = TASK_PROFILES.get(task_type, {})
+    models_cfg = config.get("models", {})
 
-    # For Tier 1 tasks, always use the primary (best) model
+    # For Tier 1 tasks, pick the best available Tier 1 model
     if profile.get("model_tier", 2) == 1:
-        return hat_def.get("primary_model", "glm-5.1")
+        # Prefer the hat's own primary if it's already Tier 1
+        hat_model = hat_def.get("primary_model", "glm-5.1")
+        model_info = models_cfg.get(hat_model, {})
+        if model_info.get("tier") == 1:
+            return hat_model
+        # Otherwise find a Tier 1 model from the config
+        for model_name, model_meta in models_cfg.items():
+            if model_meta.get("tier") == 1:
+                return model_name
+        return "glm-5.1"  # ultimate fallback
 
-    return hat_def.get("primary_model", "glm-5.1")
+    # For Tier 2+ tasks, use the hat's assigned primary model
+    return hat_def.get("primary_model", "nemotron-3-super")
 
 
 def build_task_prompt(config: dict, hat_id: str, task_type: str,

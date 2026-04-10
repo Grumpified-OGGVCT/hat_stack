@@ -107,22 +107,24 @@ jobs:
           OLLAMA_BASE_URL: ${{ secrets.OLLAMA_BASE_URL || 'https://api.ollama.ai/v1' }}
         shell: bash
         run: |
-          ARGS="--diff ${{ steps.diff.outputs.diff_file }}"
-          ARGS="$ARGS --config scripts/hat_configs.yml"
-          ARGS="$ARGS --output both"
-          ARGS="$ARGS --markdown-file /tmp/hats-report.md"
-          ARGS="$ARGS --json-file /tmp/hats-report.json"
+          ARGS=(
+            --diff "${{ steps.diff.outputs.diff_file }}"
+            --config scripts/hat_configs.yml
+            --output both
+            --markdown-file /tmp/hats-report.md
+            --json-file /tmp/hats-report.json
+          )
 
           if [ -n "${{ steps.payload.outputs.hats }}" ]; then
-            ARGS="$ARGS --hats ${{ steps.payload.outputs.hats }}"
+            ARGS+=(--hats "${{ steps.payload.outputs.hats }}")
           fi
 
           if [ -n "${{ steps.payload.outputs.context }}" ]; then
-            ARGS="$ARGS --context '${{ steps.payload.outputs.context }}'"
+            ARGS+=(--context "${{ steps.payload.outputs.context }}")
           fi
 
           set +e
-          python scripts/hats_runner.py $ARGS
+          python scripts/hats_runner.py "${ARGS[@]}"
           EXIT_CODE=$?
           set -e
 

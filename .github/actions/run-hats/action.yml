@@ -59,12 +59,6 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Checkout hat_stack
-      uses: actions/checkout@v4
-      with:
-        repository: Grumpified-OGGVCT/hat_stack
-        path: _hat_stack
-
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
@@ -72,7 +66,7 @@ runs:
 
     - name: Install dependencies
       shell: bash
-      run: pip install -r _hat_stack/scripts/requirements.txt
+      run: pip install -r $GITHUB_ACTION_PATH/../../../scripts/requirements.txt
 
     - name: Prepare diff
       id: prep
@@ -102,28 +96,32 @@ runs:
       env:
         OLLAMA_API_KEY: ${{ env.OLLAMA_API_KEY }}
         OLLAMA_BASE_URL: ${{ env.OLLAMA_BASE_URL || 'https://api.ollama.ai/v1' }}
+        HAT_STACK_ACTION_PATH: ${{ github.action_path }}
       run: |
-        CONFIG="_hat_stack/scripts/hat_configs.yml"
+        HAT_STACK_ROOT="$HAT_STACK_ACTION_PATH/../../.."
+        CONFIG="$HAT_STACK_ROOT/scripts/hat_configs.yml"
         if [ -n "${{ inputs.config }}" ] && [ -f "${{ inputs.config }}" ]; then
           CONFIG="${{ inputs.config }}"
         fi
 
-        ARGS="--diff ${{ steps.prep.outputs.diff_file }}"
-        ARGS="$ARGS --config $CONFIG"
-        ARGS="$ARGS --output ${{ inputs.output_format }}"
-        ARGS="$ARGS --markdown-file /tmp/hats-report.md"
-        ARGS="$ARGS --json-file /tmp/hats-report.json"
+        ARGS=(
+          --diff "${{ steps.prep.outputs.diff_file }}"
+          --config "$CONFIG"
+          --output "${{ inputs.output_format }}"
+          --markdown-file /tmp/hats-report.md
+          --json-file /tmp/hats-report.json
+        )
 
         if [ -n "${{ inputs.hats }}" ]; then
-          ARGS="$ARGS --hats ${{ inputs.hats }}"
+          ARGS+=(--hats "${{ inputs.hats }}")
         fi
 
         if [ -n "${{ inputs.context }}" ]; then
-          ARGS="$ARGS --context '${{ inputs.context }}'"
+          ARGS+=(--context "${{ inputs.context }}")
         fi
 
         set +e
-        python _hat_stack/scripts/hats_runner.py $ARGS
+        python "$HAT_STACK_ROOT/scripts/hats_runner.py" "${ARGS[@]}"
         EXIT_CODE=$?
         set -e
 

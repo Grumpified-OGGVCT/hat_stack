@@ -48,8 +48,38 @@ set -euo pipefail
 # Config
 # ---------------------------------------------------------------------------
 
+# Auto-detect hat_stack repo from git remote if not explicitly set
+detect_hat_stack_repo() {
+  local remote_url repo
+
+  remote_url="$(git remote get-url origin 2>/dev/null || true)"
+  [ -n "$remote_url" ] || return 1
+
+  case "$remote_url" in
+    git@github.com:*.git)
+      repo="${remote_url#git@github.com:}"
+      repo="${repo%.git}"
+      ;;
+    git@github.com:*)
+      repo="${remote_url#git@github.com:}"
+      ;;
+    https://github.com/*/*.git)
+      repo="${remote_url#https://github.com/}"
+      repo="${repo%.git}"
+      ;;
+    https://github.com/*/*)
+      repo="${remote_url#https://github.com/}"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  printf '%s\n' "$repo"
+}
+
 # Where is your hat_stack fork?
-HAT_STACK_REPO="${HAT_STACK_REPO:-Grumpified-OGGVCT/hat_stack}"
+HAT_STACK_REPO="${HAT_STACK_REPO:-$(detect_hat_stack_repo || printf '%s\n' 'Grumpified-OGGVCT/hat_stack')}"
 
 # Colors (if terminal supports them)
 if [ -t 1 ]; then

@@ -312,7 +312,7 @@ def run_hat(config: dict, hat_id: str, diff_text: str, context: str = "") -> dic
 def consolidate_reports(reports: list[dict]) -> dict:
     """Merge all hat reports into a single consolidated report.
 
-    Deduplicates overlapping findings and tallies severities.
+    Aggregates findings from all hats and tallies severities.
     """
     all_findings = []
     severity_counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
