@@ -213,7 +213,7 @@ payload = {
     'callback_repo': os.environ.get('HAT_CB_REPO', ''),
     'callback_pr': os.environ.get('HAT_CB_PR', ''),
     'callback_issue': os.environ.get('HAT_CB_ISSUE', ''),
-    'hats': os.environ.get('HAT_HATS', ''),
+    'hats': ','.join([h.strip() for h in os.environ.get('HAT_HATS', '').split(',') if h.strip()]),
     'context': os.environ.get('HAT_CTX', ''),
     'category': os.environ.get('HAT_CATEGORY', ''),
     'genre': os.environ.get('HAT_GENRE', ''),

@@ -171,7 +171,7 @@ def build_run_id(explicit_run_id: str | None = None) -> str:
     github_run_id = os.environ.get("GITHUB_RUN_ID", "").strip()
     github_attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "").strip()
     if github_run_id:
-        attempt_suffix = f"-attempt-{github_attempt}" if github_attempt else ""
+        attempt_suffix = f"-attempt-{github_attempt}" if github_attempt != "" else ""
         return f"run-{slugify_path_component(github_run_id, 'run')}{attempt_suffix}"
 
     return time.strftime("run-%Y%m%d-%H%M%S", time.gmtime())
@@ -529,7 +529,7 @@ def run_task_hat(config: dict, hat_id: str, task_type: str,
             timeout=hat_def.get("timeout_seconds", 300),
         )
         if not result["error"]:
-            fallback_used = candidate_model != attempted_models[0]
+            fallback_used = candidate_model != model
             break
 
     elapsed = time.time() - start

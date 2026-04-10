@@ -211,11 +211,13 @@ git diff main | hat review - --repo myorg/app --pr 123
 
 Task runs now support a structured playground sandbox on the runner:
 
-- Default workspace root: `/tmp/hats-playground`
+- Workflow default workspace root: `/tmp/hats-playground`
 - Layout: `<workspace>/<category>/<genre>/<project>/<run-id>/`
 - Contents: generated files, `HATS_TASK_SUMMARY.md`, `hats_task_result.json`, `PLAYGROUND_MANIFEST.json`
 - Persistence: both the run output and the full playground tree are uploaded as workflow artifacts
 - Resilience: if the first Ollama model fails, task mode retries comparable configured fallback models automatically
+
+If no workspace root is provided outside the workflow, task mode falls back to a unique temporary output directory under `/tmp`.
 
 Or dispatch directly via `gh` CLI (what your Copilot agent would call):
 
