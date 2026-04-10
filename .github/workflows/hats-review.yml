@@ -1,0 +1,223 @@
+# 🎩 Hats Team Reusable Workflow
+#
+# This is the core reusable workflow that runs the Hats pipeline.
+# Other repositories call this via workflow_call to get hat reviews
+# on their PRs, diffs, or arbitrary code changes.
+#
+# Usage from another repo:
+#   jobs:
+#     hats-review:
+#       uses: <your-fork>/hat_stack/.github/workflows/hats-review.yml@main
+#       with:
+#         diff_artifact: pr-diff  # or: diff: ${{ steps.get-diff.outputs.diff }}
+#       secrets:
+#         ollama_api_key: ${{ secrets.OLLAMA_API_KEY }}
+#
+# Note: The workflow auto-detects the repository via ${{ github.repository }},
+# so forks work without modifying this file.
+
+name: "🎩 Hats Team Review"
+
+on:
+  workflow_call:
+    inputs:
+      diff:
+        description: "The diff text to review (inline). This is the primary way to pass diffs."
+        required: false
+        type: string
+        default: ""
+      diff_artifact:
+        description: "Name of an uploaded artifact containing a diff file (for large diffs that exceed input limits). The artifact must contain a single .diff or .patch file."
+        required: false
+        type: string
+        default: ""
+      hats:
+        description: "Comma-separated hat IDs to run (e.g., 'black,blue,purple'). Default: auto-select."
+        required: false
+        type: string
+        default: ""
+      context:
+        description: "Additional context for the review (e.g., PR description, task brief)."
+        required: false
+        type: string
+        default: ""
+      output_format:
+        description: "Output format: json, markdown, or both."
+        required: false
+        type: string
+        default: "both"
+      fail_on_escalate:
+        description: "Whether to fail the workflow on ESCALATE verdict (default: false, only fails on QUARANTINE)."
+        required: false
+        type: boolean
+        default: false
+    outputs:
+      verdict:
+        description: "The final Hats verdict: ALLOW, ESCALATE, or QUARANTINE."
+        value: ${{ jobs.hats-review.outputs.verdict }}
+      risk_score:
+        description: "Composite risk score (0–100)."
+        value: ${{ jobs.hats-review.outputs.risk_score }}
+      hats_executed:
+        description: "Number of hats that ran."
+        value: ${{ jobs.hats-review.outputs.hats_executed }}
+      report_markdown:
+        description: "The Markdown review report."
+        value: ${{ jobs.hats-review.outputs.report_markdown }}
+    secrets:
+      ollama_api_key:
+        description: "Ollama Cloud API key for LLM inference."
+        required: true
+      ollama_base_url:
+        description: "Ollama Cloud base URL (default: https://api.ollama.ai/v1)."
+        required: false
+
+jobs:
+  hats-review:
+    name: "🎩 Run Hats Pipeline"
+    runs-on: ubuntu-latest
+    outputs:
+      verdict: ${{ steps.run.outputs.verdict }}
+      risk_score: ${{ steps.run.outputs.risk_score }}
+      hats_executed: ${{ steps.run.outputs.hats_executed }}
+      report_markdown: ${{ steps.report.outputs.markdown }}
+
+    steps:
+      - name: Checkout hat_stack
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          path: hat_stack
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r hat_stack/scripts/requirements.txt
+
+      - name: Download diff artifact
+        if: inputs.diff_artifact != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.diff_artifact }}
+          path: /tmp/hats-artifact-diff
+
+      - name: Prepare diff input
+        id: diff
+        shell: bash
+        run: |
+          DIFF_FILE="/tmp/hats-diff.patch"
+
+          # Priority: 1) artifact, 2) inline diff
+          if [ -d "/tmp/hats-artifact-diff" ]; then
+            # Find the first .diff or .patch file in the downloaded artifact (null-safe)
+            FOUND=""
+            while IFS= read -r -d '' fpath; do
+              FOUND="$fpath"
+              break
+            done < <(find /tmp/hats-artifact-diff -type f \( -name "*.diff" -o -name "*.patch" \) -print0)
+            if [ -z "$FOUND" ]; then
+              # Fall back to first file
+              while IFS= read -r -d '' fpath; do
+                FOUND="$fpath"
+                break
+              done < <(find /tmp/hats-artifact-diff -type f -print0)
+            fi
+            if [ -n "$FOUND" ]; then
+              cp "$FOUND" "$DIFF_FILE"
+            fi
+          elif [ -n "${{ inputs.diff }}" ]; then
+            cat <<'HATS_DIFF_EOF' > "$DIFF_FILE"
+          ${{ inputs.diff }}
+          HATS_DIFF_EOF
+          else
+            echo "⚠️ No diff provided. Provide either 'diff' (inline) or 'diff_artifact' (artifact name)." >&2
+            echo "verdict=ALLOW" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "diff_file=$DIFF_FILE" >> "$GITHUB_OUTPUT"
+
+      - name: Run Hats Pipeline
+        id: run
+        env:
+          OLLAMA_API_KEY: ${{ secrets.ollama_api_key }}
+          OLLAMA_BASE_URL: ${{ secrets.ollama_base_url || 'https://api.ollama.ai/v1' }}
+        shell: bash
+        run: |
+          ARGS=(
+            --diff "${{ steps.diff.outputs.diff_file }}"
+            --config "hat_stack/scripts/hat_configs.yml"
+            --output "${{ inputs.output_format }}"
+            --markdown-file /tmp/hats-report.md
+            --json-file /tmp/hats-report.json
+          )
+
+          if [ -n "${{ inputs.hats }}" ]; then
+            ARGS+=(--hats "${{ inputs.hats }}")
+          fi
+
+          if [ -n "${{ inputs.context }}" ]; then
+            ARGS+=(--context "${{ inputs.context }}")
+          fi
+
+          # Run the pipeline — capture exit code but don't fail yet
+          set +e
+          python hat_stack/scripts/hats_runner.py "${ARGS[@]}"
+          EXIT_CODE=$?
+          set -e
+
+          # Read outputs from the runner
+          if [ -f /tmp/hats-report.json ]; then
+            VERDICT=$(python -c "import json; print(json.load(open('/tmp/hats-report.json'))['verdict'])")
+            RISK_SCORE=$(python -c "import json; print(json.load(open('/tmp/hats-report.json'))['risk_score'])")
+            HATS_EXECUTED=$(python -c "import json; print(json.load(open('/tmp/hats-report.json'))['hats_executed'])")
+          else
+            VERDICT="ALLOW"
+            RISK_SCORE="0"
+            HATS_EXECUTED="0"
+          fi
+
+          echo "verdict=$VERDICT" >> "$GITHUB_OUTPUT"
+          echo "risk_score=$RISK_SCORE" >> "$GITHUB_OUTPUT"
+          echo "hats_executed=$HATS_EXECUTED" >> "$GITHUB_OUTPUT"
+
+      - name: Read Markdown report
+        id: report
+        shell: bash
+        run: |
+          if [ -f /tmp/hats-report.md ]; then
+            {
+              echo "markdown<<HATS_MD_EOF"
+              cat /tmp/hats-report.md
+              echo "HATS_MD_EOF"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "markdown=No report generated." >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload reports as artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hats-review-report
+          path: |
+            /tmp/hats-report.md
+            /tmp/hats-report.json
+          retention-days: 30
+
+      - name: Check verdict
+        shell: bash
+        run: |
+          VERDICT="${{ steps.run.outputs.verdict }}"
+          if [ "$VERDICT" = "QUARANTINE" ]; then
+            echo "🚫 QUARANTINE — Hats review found critical issues."
+            exit 1
+          elif [ "$VERDICT" = "ESCALATE" ] && [ "${{ inputs.fail_on_escalate }}" = "true" ]; then
+            echo "⚠️ ESCALATE — Hats review found issues requiring human review."
+            exit 1
+          else
+            echo "✅ Verdict: $VERDICT"
+          fi

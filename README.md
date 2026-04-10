@@ -121,11 +121,111 @@ You don't need to adopt all 18 hats at once. The recommended path:
 
 ---
 
+## 🚀 Use It — GitHub Actions Integration
+
+Hat Stack runs **in GitHub** as a tool your other projects can call. It does two things:
+
+1. **Review** — Analyze PRs and diffs through 18 expert lenses
+2. **Task** — Actually *do work*: generate code, write docs, create plans, build tests
+
+### Quick Start: Fork & Go
+
+1. **Fork** this repo
+2. Add `OLLAMA_API_KEY` as a **Repository Secret** in your fork
+3. Done — your fork's workflows are live
+
+> **Your keys stay yours.** GitHub Secrets are encrypted, never in code, and never transferred to forks. See [`FORK_SETUP.md`](FORK_SETUP.md) for the full guide.
+
+### Hook Up Your Other Projects (Review Mode)
+
+**Option A — Reusable Workflow** (recommended):
+```yaml
+# In your other repo: .github/workflows/hats.yml
+name: "🎩 Hats Review"
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  get-diff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Generate diff
+        id: diff
+        run: |
+          git diff origin/${{ github.base_ref }}...HEAD > /tmp/pr.diff
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pr-diff
+          path: /tmp/pr.diff
+
+  hats-review:
+    needs: get-diff
+    uses: YOUR_USERNAME/hat_stack/.github/workflows/hats-review.yml@main
+    with:
+      diff_artifact: pr-diff
+    secrets:
+      ollama_api_key: ${{ secrets.OLLAMA_API_KEY }}
+```
+
+**Option B — Composite Action**:
+```yaml
+- uses: YOUR_USERNAME/hat_stack/.github/actions/run-hats@main
+  with:
+    diff_file: /tmp/pr.diff
+  env:
+    OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
+```
+
+### 🤖 Task Mode — Tell It to DO Things (via `hat` CLI or GitHub CLI)
+
+Install the `hat` CLI, then your local agent (Copilot, etc.) can dispatch real work:
+
+```bash
+# Install (one time)
+cp scripts/hat /usr/local/bin/hat   # or add scripts/ to PATH
+export HAT_STACK_REPO="YOUR_USERNAME/hat_stack"
+
+# Generate code
+hat task generate_code "Build a FastAPI auth module with JWT" --repo myorg/app --pr 42
+
+# Write documentation
+hat task generate_docs "Write API docs for /users endpoints" --repo myorg/app --issue 10
+
+# Create a plan
+hat task plan "Plan migration from REST to GraphQL" --repo myorg/app
+
+# Generate tests
+hat task test "Write unit tests for auth.py" --repo myorg/app --pr 88
+
+# Deep analysis
+hat task analyze "Security audit of payment processing" --repo myorg/payments
+
+# Review a diff
+git diff main | hat review - --repo myorg/app --pr 123
+```
+
+Or dispatch directly via `gh` CLI (what your Copilot agent would call):
+
+```bash
+gh api repos/YOUR_USERNAME/hat_stack/dispatches \
+  -f event_type=run-task \
+  -f client_payload='{"task":"generate_code","prompt":"Build auth module","callback_repo":"myorg/app","callback_pr":"42"}'
+```
+
+→ Full integration guide: [`FORK_SETUP.md`](FORK_SETUP.md)
+
+---
+
 ## Documentation
 
 | Document | Description |
 |----------|-------------|
 | [`README.md`](README.md) | This file — project overview, architecture, and quick reference |
+| [`FORK_SETUP.md`](FORK_SETUP.md) | **Fork & Setup Guide** — get your own working Hat Stack in 5 minutes, secret management, integration patterns |
 | [`SPEC.md`](SPEC.md) | **Primary specification** — orchestration, gates, retry policies, HITL framework, CI/CD integration, security, deployment guide, and all appendices |
 | [`CATALOG.md`](CATALOG.md) | **Master Hat Registry** — design philosophy, full hat table with triggers, severity grading, and composite risk score |
 | [`hats/01_red_hat.md`](hats/01_red_hat.md) – [`hats/18_gold_hat.md`](hats/18_gold_hat.md) | Individual hat specifications with detailed assignments, severity grading, tools, and token budgets |
@@ -140,9 +240,26 @@ You don't need to adopt all 18 hats at once. The recommended path:
 ```
 hat_stack/
 ├── README.md                                  ← This file — project overview & navigation
+├── FORK_SETUP.md                              ← Fork & setup guide (start here for your own instance)
+├── .env.example                               ← Environment template (copy to .env for local use)
 ├── CATALOG.md                                 ← Master Hat Registry (full table + design philosophy)
 ├── SPEC.md                                    ← Primary specification (16 sections + appendices)
 ├── LICENSE                                    ← MIT License
+├── .github/
+│   ├── workflows/
+│   │   ├── hats-review.yml                    ← Reusable workflow (other repos call this for reviews)
+│   │   ├── hats-dispatch.yml                  ← Dispatch handler (API-triggered reviews)
+│   │   ├── hats-task.yml                      ← Task execution (generate code, docs, plans, etc.)
+│   │   └── hats-self-review.yml               ← Self-review (reviews PRs to this repo)
+│   └── actions/
+│       └── run-hats/
+│           └── action.yml                     ← Composite action (direct step in any workflow)
+├── scripts/
+│   ├── hat                                    ← CLI wrapper — dispatch tasks from terminal or agents
+│   ├── hats_runner.py                         ← Review orchestrator (Conductor + all hat logic)
+│   ├── hats_task_runner.py                    ← Task orchestrator (generate, refactor, plan, etc.)
+│   ├── hat_configs.yml                        ← Hat-to-model mapping & configuration
+│   └── requirements.txt                       ← Python dependencies
 └── hats/
     ├── 01_red_hat.md                          ← Individual hat specifications
     ├── 02_black_hat.md

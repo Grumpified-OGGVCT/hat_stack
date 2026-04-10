@@ -1,0 +1,299 @@
+#!/usr/bin/env bash
+# =============================================================================
+# 🎩 hat — CLI for dispatching Hat Stack tasks from your terminal
+# =============================================================================
+#
+# Prerequisites:
+#   - GitHub CLI (`gh`) installed and authenticated: https://cli.github.com
+#   - Your hat_stack fork (or the original if you have dispatch permissions)
+#
+# Usage:
+#   hat review <diff_file> [--repo owner/repo] [--pr 42]
+#   hat task <task_type> "<prompt>" [--repo owner/repo] [--pr 42] [--hats black,green]
+#   hat status [run_id]
+#   hat list-tasks
+#
+# Examples:
+#   # Review a PR diff
+#   git diff origin/main...HEAD | hat review - --repo myorg/myapp --pr 123
+#
+#   # Generate a new module
+#   hat task generate_code "Build a FastAPI auth module with JWT and refresh tokens" \
+#     --repo myorg/myapp --pr 123
+#
+#   # Write docs for an existing module
+#   hat task generate_docs "Write API documentation for the /users endpoints" \
+#     --repo myorg/myapp --issue 45
+#
+#   # Create an implementation plan
+#   hat task plan "Plan a migration from REST to GraphQL for the orders service"
+#
+#   # Generate tests
+#   hat task test "Write unit tests for auth.py covering edge cases" \
+#     --repo myorg/myapp --pr 88
+#
+#   # Deep security analysis
+#   hat task analyze "Security audit of the payment processing module" \
+#     --repo myorg/payments
+#
+# Configuration:
+#   Set HAT_STACK_REPO to point to your fork (default: auto-detect from git remote)
+#   export HAT_STACK_REPO="yourusername/hat_stack"
+#
+# =============================================================================
+
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# Config
+# ---------------------------------------------------------------------------
+
+# Auto-detect hat_stack repo from git remote if not explicitly set
+detect_hat_stack_repo() {
+  local remote_url repo
+
+  remote_url="$(git remote get-url origin 2>/dev/null || true)"
+  [ -n "$remote_url" ] || return 1
+
+  case "$remote_url" in
+    git@github.com:*.git)
+      repo="${remote_url#git@github.com:}"
+      repo="${repo%.git}"
+      ;;
+    git@github.com:*)
+      repo="${remote_url#git@github.com:}"
+      ;;
+    https://github.com/*/*.git)
+      repo="${remote_url#https://github.com/}"
+      repo="${repo%.git}"
+      ;;
+    https://github.com/*/*)
+      repo="${remote_url#https://github.com/}"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  printf '%s\n' "$repo"
+}
+
+# Where is your hat_stack fork?
+HAT_STACK_REPO="${HAT_STACK_REPO:-$(detect_hat_stack_repo || printf '%s\n' 'Grumpified-OGGVCT/hat_stack')}"
+
+# Colors (if terminal supports them)
+if [ -t 1 ]; then
+  RED='\033[0;31m'
+  GREEN='\033[0;32m'
+  YELLOW='\033[1;33m'
+  CYAN='\033[0;36m'
+  BOLD='\033[1m'
+  NC='\033[0m'
+else
+  RED='' GREEN='' YELLOW='' CYAN='' BOLD='' NC=''
+fi
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+die() { echo -e "${RED}❌ $*${NC}" >&2; exit 1; }
+info() { echo -e "${CYAN}🎩 $*${NC}" >&2; }
+success() { echo -e "${GREEN}✅ $*${NC}" >&2; }
+warn() { echo -e "${YELLOW}⚠️  $*${NC}" >&2; }
+
+check_gh() {
+  command -v gh >/dev/null 2>&1 || die "GitHub CLI (gh) not found. Install: https://cli.github.com"
+  gh auth status >/dev/null 2>&1 || die "GitHub CLI not authenticated. Run: gh auth login"
+}
+
+# ---------------------------------------------------------------------------
+# Commands
+# ---------------------------------------------------------------------------
+
+cmd_review() {
+  local diff_source="$1"; shift
+  local callback_repo="" callback_pr="" callback_issue="" hats="" context=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --repo)    callback_repo="$2"; shift 2 ;;
+      --pr)      callback_pr="$2"; shift 2 ;;
+      --issue)   callback_issue="$2"; shift 2 ;;
+      --hats)    hats="$2"; shift 2 ;;
+      --context) context="$2"; shift 2 ;;
+      *) die "Unknown option: $1" ;;
+    esac
+  done
+
+  # Read diff
+  local diff_text
+  if [ "$diff_source" = "-" ]; then
+    diff_text=$(cat)
+  elif [ -f "$diff_source" ]; then
+    diff_text=$(cat "$diff_source")
+  else
+    die "Diff source not found: $diff_source"
+  fi
+
+  [ -z "$diff_text" ] && die "Empty diff — nothing to review"
+
+  info "Dispatching review to ${HAT_STACK_REPO}..."
+
+  # Build payload — pass vars via env to avoid shell injection
+  local payload
+  payload=$(HAT_CB_REPO="$callback_repo" HAT_CB_PR="$callback_pr" \
+    HAT_CB_ISSUE="$callback_issue" HAT_HATS="$hats" HAT_CTX="$context" \
+    python3 -c "
+import json, os, sys
+payload = {
+    'diff': sys.stdin.read(),
+    'callback_repo': os.environ.get('HAT_CB_REPO', ''),
+    'callback_pr': os.environ.get('HAT_CB_PR', ''),
+    'callback_issue': os.environ.get('HAT_CB_ISSUE', ''),
+    'hats': os.environ.get('HAT_HATS', ''),
+    'context': os.environ.get('HAT_CTX', ''),
+}
+payload = {k: v for k, v in payload.items() if v}
+print(json.dumps(payload))
+" <<< "$diff_text")
+
+  gh api "repos/${HAT_STACK_REPO}/dispatches" \
+    -f event_type=run-hats \
+    --raw-field "client_payload=${payload}"
+
+  success "Review dispatched to ${HAT_STACK_REPO}"
+  info "Check progress: gh run list -R ${HAT_STACK_REPO} -w 'Hats Dispatch Handler'"
+
+  if [ -n "$callback_repo" ] && [ -n "$callback_pr" ]; then
+    info "Results will be posted to ${callback_repo}#${callback_pr}"
+  fi
+}
+
+cmd_task() {
+  local task_type="$1"; shift
+  local prompt="$1"; shift
+  local callback_repo="" callback_pr="" callback_issue="" hats="" context=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --repo)    callback_repo="$2"; shift 2 ;;
+      --pr)      callback_pr="$2"; shift 2 ;;
+      --issue)   callback_issue="$2"; shift 2 ;;
+      --hats)    hats="$2"; shift 2 ;;
+      --context) context="$2"; shift 2 ;;
+      *) die "Unknown option: $1" ;;
+    esac
+  done
+
+  # Validate task type
+  local valid_tasks="generate_code generate_docs refactor analyze plan test"
+  echo "$valid_tasks" | grep -qw "$task_type" || \
+    die "Unknown task: $task_type\n   Available: $valid_tasks"
+
+  info "Dispatching task '${task_type}' to ${HAT_STACK_REPO}..."
+  info "Prompt: ${prompt}"
+
+  # Build payload — pass vars via env to avoid shell injection
+  local payload
+  payload=$(HAT_TASK="$task_type" HAT_PROMPT="$prompt" \
+    HAT_CB_REPO="$callback_repo" HAT_CB_PR="$callback_pr" \
+    HAT_CB_ISSUE="$callback_issue" HAT_HATS="$hats" HAT_CTX="$context" \
+    python3 -c "
+import json, os
+payload = {
+    'task': os.environ.get('HAT_TASK', ''),
+    'prompt': os.environ.get('HAT_PROMPT', ''),
+    'callback_repo': os.environ.get('HAT_CB_REPO', ''),
+    'callback_pr': os.environ.get('HAT_CB_PR', ''),
+    'callback_issue': os.environ.get('HAT_CB_ISSUE', ''),
+    'hats': os.environ.get('HAT_HATS', ''),
+    'context': os.environ.get('HAT_CTX', ''),
+}
+payload = {k: v for k, v in payload.items() if v}
+print(json.dumps(payload))
+")
+
+  gh api "repos/${HAT_STACK_REPO}/dispatches" \
+    -f event_type=run-task \
+    --raw-field "client_payload=${payload}"
+
+  success "Task dispatched to ${HAT_STACK_REPO}"
+  info "Check progress: gh run list -R ${HAT_STACK_REPO} -w 'Hats Task Execution'"
+
+  if [ -n "$callback_repo" ]; then
+    local target="${callback_pr:-$callback_issue}"
+    [ -n "$target" ] && info "Results will be posted to ${callback_repo}#${target}"
+  fi
+}
+
+cmd_status() {
+  local run_id="${1:-}"
+
+  if [ -n "$run_id" ]; then
+    gh run view "$run_id" -R "${HAT_STACK_REPO}"
+  else
+    info "Recent workflow runs:"
+    gh run list -R "${HAT_STACK_REPO}" --limit 10
+  fi
+}
+
+cmd_list_tasks() {
+  echo -e "${BOLD}Available task types:${NC}"
+  echo ""
+  echo -e "  ${CYAN}generate_code${NC}   — Build modules, functions, classes, APIs"
+  echo -e "  ${CYAN}generate_docs${NC}   — Write documentation, READMEs, ADRs, specs"
+  echo -e "  ${CYAN}refactor${NC}        — Restructure, optimize, or modernize existing code"
+  echo -e "  ${CYAN}analyze${NC}         — Deep analysis with written report"
+  echo -e "  ${CYAN}plan${NC}            — Implementation plans, roadmaps, task breakdowns"
+  echo -e "  ${CYAN}test${NC}            — Generate test suites, test cases, fixtures"
+  echo ""
+  echo -e "${BOLD}Usage:${NC}"
+  echo '  hat task generate_code "Build a user auth module" --repo myorg/myapp --pr 42'
+  echo '  hat task plan "Plan migration to microservices" --repo myorg/monolith'
+}
+
+cmd_help() {
+  echo -e "${BOLD}🎩 hat${NC} — CLI for the Hat Stack agentic AI review & task system"
+  echo ""
+  echo -e "${BOLD}Usage:${NC}"
+  echo "  hat review <diff_file|-> [options]     Review a code diff"
+  echo "  hat task <type> \"<prompt>\" [options]    Execute an agentic task"
+  echo "  hat status [run_id]                    Check workflow run status"
+  echo "  hat list-tasks                         Show available task types"
+  echo "  hat help                               Show this help"
+  echo ""
+  echo -e "${BOLD}Options:${NC}"
+  echo "  --repo <owner/name>    Target repo for callbacks"
+  echo "  --pr <number>          PR to post results to"
+  echo "  --issue <number>       Issue to post results to"
+  echo "  --hats <hat1,hat2>     Specific hats to use"
+  echo "  --context <text>       Additional context"
+  echo ""
+  echo -e "${BOLD}Examples:${NC}"
+  echo '  git diff main | hat review - --repo myorg/app --pr 42'
+  echo '  hat task generate_code "Build JWT auth module" --repo myorg/app --pr 42'
+  echo '  hat task generate_docs "Write API docs for /users" --repo myorg/app --issue 10'
+  echo '  hat task plan "Plan GraphQL migration" --repo myorg/app'
+  echo '  hat task analyze "Security audit of payments" --repo myorg/payments'
+  echo ""
+  echo -e "${BOLD}Config:${NC}"
+  echo "  HAT_STACK_REPO   Your hat_stack fork (default: ${HAT_STACK_REPO})"
+  echo ""
+  echo "  Full docs: https://github.com/${HAT_STACK_REPO}/blob/main/FORK_SETUP.md"
+}
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+check_gh
+
+case "${1:-help}" in
+  review)     shift; cmd_review "$@" ;;
+  task)       shift; cmd_task "$@" ;;
+  status)     shift; cmd_status "$@" ;;
+  list-tasks) cmd_list_tasks ;;
+  help|--help|-h) cmd_help ;;
+  *) die "Unknown command: $1\nRun 'hat help' for usage." ;;
+esac

@@ -1,0 +1,215 @@
+# 🎩 Hats Team Dispatch Handler
+#
+# Handles repository_dispatch events from external repos/agents.
+# Any external system can trigger a Hats review by sending a POST
+# to the GitHub API:
+#
+#   curl -X POST \
+#     -H "Authorization: Bearer $GITHUB_TOKEN" \
+#     -H "Accept: application/vnd.github+json" \
+#     https://api.github.com/repos/Grumpified-OGGVCT/hat_stack/dispatches \
+#     -d '{
+#       "event_type": "run-hats",
+#       "client_payload": {
+#         "diff": "--- a/file.py\n+++ b/file.py\n...",
+#         "callback_repo": "owner/repo",
+#         "callback_pr": 42,
+#         "hats": "black,blue,purple",
+#         "context": "Adding new auth module"
+#       }
+#     }'
+#
+# The workflow runs the Hats pipeline and posts results back to the
+# calling repo's PR as a comment (if callback info is provided).
+
+name: "🎩 Hats Dispatch Handler"
+
+on:
+  repository_dispatch:
+    types:
+      - run-hats
+      - hats-review
+      - hat-review
+
+permissions:
+  contents: read
+
+jobs:
+  dispatch-review:
+    name: "🎩 Dispatched Hats Review"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout hat_stack
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r scripts/requirements.txt
+
+      - name: Prepare diff
+        id: diff
+        shell: bash
+        run: |
+          DIFF_FILE="/tmp/dispatch-diff.patch"
+          PAYLOAD='${{ toJson(github.event.client_payload) }}'
+
+          # Extract diff from payload
+          echo "$PAYLOAD" | python3 -c "
+          import json, sys
+          try:
+              payload = json.load(sys.stdin)
+              diff = payload.get('diff', '')
+          except (json.JSONDecodeError, KeyError) as e:
+              print(f'Warning: Could not parse payload: {e}', file=sys.stderr)
+              diff = ''
+          with open('$DIFF_FILE', 'w') as f:
+              f.write(diff)
+          " || echo "" > "$DIFF_FILE"
+
+          echo "diff_file=$DIFF_FILE" >> "$GITHUB_OUTPUT"
+
+      - name: Extract payload fields
+        id: payload
+        shell: bash
+        run: |
+          PAYLOAD='${{ toJson(github.event.client_payload) }}'
+          echo "$PAYLOAD" | python3 -c "
+          import json, sys, os, re
+
+          def sanitize(value):
+              '''Remove newlines and control chars to prevent output injection.'''
+              if not isinstance(value, str):
+                  value = str(value) if value is not None else ''
+              return re.sub(r'[\r\n]', ' ', value).strip()
+
+          try:
+              payload = json.load(sys.stdin)
+          except json.JSONDecodeError:
+              payload = {}
+          gh_output = os.environ['GITHUB_OUTPUT']
+          with open(gh_output, 'a') as f:
+              f.write(f\"hats={sanitize(payload.get('hats', ''))}\n\")
+              f.write(f\"context={sanitize(payload.get('context', ''))}\n\")
+              f.write(f\"callback_repo={sanitize(payload.get('callback_repo', ''))}\n\")
+              f.write(f\"callback_pr={sanitize(payload.get('callback_pr', ''))}\n\")
+              f.write(f\"callback_issue={sanitize(payload.get('callback_issue', ''))}\n\")
+          "
+
+      - name: Run Hats Pipeline
+        id: run
+        env:
+          OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
+          OLLAMA_BASE_URL: ${{ secrets.OLLAMA_BASE_URL || 'https://api.ollama.ai/v1' }}
+        shell: bash
+        run: |
+          ARGS=(
+            --diff "${{ steps.diff.outputs.diff_file }}"
+            --config scripts/hat_configs.yml
+            --output both
+            --markdown-file /tmp/hats-report.md
+            --json-file /tmp/hats-report.json
+          )
+
+          if [ -n "${{ steps.payload.outputs.hats }}" ]; then
+            ARGS+=(--hats "${{ steps.payload.outputs.hats }}")
+          fi
+
+          if [ -n "${{ steps.payload.outputs.context }}" ]; then
+            ARGS+=(--context "${{ steps.payload.outputs.context }}")
+          fi
+
+          set +e
+          python scripts/hats_runner.py "${ARGS[@]}"
+          EXIT_CODE=$?
+          set -e
+
+          if [ -f /tmp/hats-report.json ]; then
+            VERDICT=$(python3 -c "import json; print(json.load(open('/tmp/hats-report.json'))['verdict'])")
+            RISK_SCORE=$(python3 -c "import json; print(json.load(open('/tmp/hats-report.json'))['risk_score'])")
+          else
+            VERDICT="ALLOW"
+            RISK_SCORE="0"
+          fi
+
+          echo "verdict=$VERDICT" >> "$GITHUB_OUTPUT"
+          echo "risk_score=$RISK_SCORE" >> "$GITHUB_OUTPUT"
+
+      - name: Post results to calling repo PR
+        if: steps.payload.outputs.callback_repo != '' && steps.payload.outputs.callback_pr != ''
+        env:
+          GH_TOKEN: ${{ secrets.HAT_STACK_CALLBACK_TOKEN }}
+        shell: bash
+        run: |
+          CALLBACK_REPO="${{ steps.payload.outputs.callback_repo }}"
+          CALLBACK_PR="${{ steps.payload.outputs.callback_pr }}"
+
+          if [ -z "$GH_TOKEN" ]; then
+            echo "⚠️ HAT_STACK_CALLBACK_TOKEN not set — cannot post results to $CALLBACK_REPO#$CALLBACK_PR"
+            exit 0
+          fi
+
+          # Build comment body from report or fallback
+          if [ -f /tmp/hats-report.md ]; then
+            REPORT_BODY=$(cat /tmp/hats-report.md)
+          else
+            REPORT_BODY="🎩 Hats Review completed. Verdict: ${{ steps.run.outputs.verdict }} (Score: ${{ steps.run.outputs.risk_score }})"
+          fi
+
+          python3 -c "
+          import json, sys
+          body = sys.stdin.read()
+          print(json.dumps({'body': body}))
+          " <<< "$REPORT_BODY" | curl -s -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$CALLBACK_REPO/issues/$CALLBACK_PR/comments" \
+            -d @-
+
+          echo "✅ Results posted to $CALLBACK_REPO#$CALLBACK_PR"
+
+      - name: Post results to calling repo issue
+        if: steps.payload.outputs.callback_repo != '' && steps.payload.outputs.callback_issue != ''
+        env:
+          GH_TOKEN: ${{ secrets.HAT_STACK_CALLBACK_TOKEN }}
+        shell: bash
+        run: |
+          CALLBACK_REPO="${{ steps.payload.outputs.callback_repo }}"
+          CALLBACK_ISSUE="${{ steps.payload.outputs.callback_issue }}"
+
+          if [ -z "$GH_TOKEN" ]; then
+            echo "⚠️ HAT_STACK_CALLBACK_TOKEN not set — cannot post results to $CALLBACK_REPO#$CALLBACK_ISSUE"
+            exit 0
+          fi
+
+          if [ -f /tmp/hats-report.md ]; then
+            REPORT_BODY=$(cat /tmp/hats-report.md)
+          else
+            REPORT_BODY="🎩 Hats Review completed."
+          fi
+
+          python3 -c "
+          import json, sys
+          body = sys.stdin.read()
+          print(json.dumps({'body': body}))
+          " <<< "$REPORT_BODY" | curl -s -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$CALLBACK_REPO/issues/$CALLBACK_ISSUE/comments" \
+            -d @-
+
+          echo "✅ Results posted to $CALLBACK_REPO#$CALLBACK_ISSUE"
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hats-dispatch-report
+          path: |
+            /tmp/hats-report.md
+            /tmp/hats-report.json
+          retention-days: 30

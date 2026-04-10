@@ -1,0 +1,483 @@
+# 🎩 Hat-to-Model Configuration
+# Based on HATS_TEAM_IMPLEMENTATION_GUIDE.md §E2.2 and §E3.1
+# Models reference Ollama Cloud (OpenAI-compatible API)
+#
+# Model options per the guide's 29-model inventory:
+#   Tier 1 (Critical Reasoning): glm-5.1:cloud, kimi-k2.5:cloud
+#   Tier 2 (Architectural):      glm-5.1:cloud, deepseek-v3.1:cloud, minimax-m2.7:cloud
+#   Tier 3 (Quality Analysis):   nemotron-3-super:cloud, qwen3-coder:cloud
+#   Tier 4 (Fast Scanning):      nemotron-3-nano:cloud, ministral-3:cloud
+
+api:
+  base_url_env: OLLAMA_BASE_URL
+  default_base_url: "https://api.ollama.ai/v1"
+  api_key_env: OLLAMA_API_KEY
+
+models:
+  glm-5.1:
+    tier: 1
+    context_window: 128000
+    input_cost_per_m: 0.40
+    output_cost_per_m: 1.10
+  kimi-k2.5:
+    tier: 1
+    context_window: 128000
+    input_cost_per_m: 0.42
+    output_cost_per_m: 1.50
+  deepseek-v3.1:
+    tier: 2
+    context_window: 128000
+    input_cost_per_m: 0.10
+    output_cost_per_m: 0.28
+  minimax-m2.7:
+    tier: 2
+    context_window: 128000
+    input_cost_per_m: 0.30
+    output_cost_per_m: 1.20
+  nemotron-3-super:
+    tier: 3
+    context_window: 32000
+    input_cost_per_m: 0.25
+    output_cost_per_m: 0.80
+  qwen3-coder:
+    tier: 3
+    context_window: 128000
+    input_cost_per_m: 0.20
+    output_cost_per_m: 0.80
+  nemotron-3-nano:
+    tier: 4
+    context_window: 32000
+    input_cost_per_m: 0.08
+    output_cost_per_m: 0.20
+  ministral-3:
+    tier: 4
+    context_window: 32000
+    input_cost_per_m: 0.05
+    output_cost_per_m: 0.15
+
+# Hat definitions — per HATS_TEAM_IMPLEMENTATION_GUIDE.md §E2.2
+hats:
+  black:
+    name: "Black Hat — Security & Exploits"
+    emoji: "⚫"
+    number: 2
+    always_run: true
+    primary_model: "glm-5.1"
+    fallback_model: "deepseek-v3.1"
+    temperature: 0.2
+    max_tokens: 4096
+    timeout_seconds: 150
+    triggers: []  # Always runs
+    persona: |
+      You are BlackHat, an elite adversarial security analyst specializing
+      in penetration testing, threat modeling, and secure code review. You approach
+      every code change as a potential attack surface. Your mission is to find
+      exploitable vulnerabilities before attackers do.
+
+  red:
+    name: "Red Hat — Failure & Resilience"
+    emoji: "🔴"
+    number: 1
+    always_run: false
+    primary_model: "glm-5.1"
+    fallback_model: "nemotron-3-super"
+    temperature: 0.3
+    max_tokens: 4096
+    timeout_seconds: 120
+    triggers:
+      - "error"
+      - "retry"
+      - "catch"
+      - "exception"
+      - "async"
+      - "concurrent"
+      - "thread"
+      - "lock"
+      - "mutex"
+    persona: |
+      You are RedHat, a chaos engineering and resilience specialist. You think
+      in failure modes: what breaks when load spikes, when dependencies fail,
+      when networks partition. You find cascade failures and single points of failure.
+
+  white:
+    name: "White Hat — Efficiency & Resources"
+    emoji: "⚪"
+    number: 3
+    always_run: false
+    primary_model: "nemotron-3-super"
+    fallback_model: "ministral-3"
+    temperature: 0.1
+    max_tokens: 2048
+    timeout_seconds: 90
+    triggers:
+      - "loop"
+      - "query"
+      - "select"
+      - "insert"
+      - "batch"
+      - "cache"
+      - "memory"
+      - "token"
+    persona: |
+      You are WhiteHat, a performance and efficiency analyst. You find wasted
+      compute, unnecessary allocations, N+1 queries, token waste, and opportunities
+      for caching, batching, and resource optimization.
+
+  yellow:
+    name: "Yellow Hat — Synergies & Integration"
+    emoji: "🟡"
+    number: 4
+    always_run: false
+    primary_model: "glm-5.1"
+    fallback_model: "nemotron-3-super"
+    temperature: 0.3
+    max_tokens: 4096
+    timeout_seconds: 120
+    triggers:
+      - "import"
+      - "api"
+      - "service"
+      - "endpoint"
+      - "interface"
+      - "dependency"
+    persona: |
+      You are YellowHat, an integration and synergy analyst. You discover
+      cross-component value, shared abstractions, and dependency optimization
+      opportunities across services.
+
+  green:
+    name: "Green Hat — Evolution & Extensibility"
+    emoji: "🟢"
+    number: 5
+    always_run: false
+    primary_model: "glm-5.1"
+    fallback_model: "minimax-m2.7"
+    temperature: 0.3
+    max_tokens: 4096
+    timeout_seconds: 120
+    triggers:
+      - "module"
+      - "plugin"
+      - "abstract"
+      - "interface"
+      - "version"
+      - "deprecat"
+    persona: |
+      You are GreenHat, an architecture evolution specialist. You evaluate
+      extensibility, versioning strategy, deprecation paths, and future-proofing
+      of architectural decisions.
+
+  blue:
+    name: "Blue Hat — Process & Specification"
+    emoji: "🔵"
+    number: 6
+    always_run: true
+    primary_model: "nemotron-3-super"
+    fallback_model: "ministral-3"
+    temperature: 0.1
+    max_tokens: 2048
+    timeout_seconds: 60
+    triggers: []  # Always runs
+    persona: |
+      You are BlueHat, a process and specification compliance analyst. You verify
+      spec coverage, test completeness, commit hygiene, documentation quality,
+      and adherence to project standards.
+
+  indigo:
+    name: "Indigo Hat — Cross-Feature Architecture"
+    emoji: "🟣"
+    number: 7
+    always_run: false
+    primary_model: "deepseek-v3.1"
+    fallback_model: "nemotron-3-super"
+    temperature: 0.3
+    max_tokens: 4096
+    timeout_seconds: 120
+    triggers:
+      - "import"
+      - "shared"
+      - "common"
+      - "util"
+      - "integration"
+    persona: |
+      You are IndigoHat, a cross-feature architecture analyst. You find
+      macro-level DRY violations, duplicated pipelines, and opportunities
+      for shared abstractions across modules.
+
+  cyan:
+    name: "Cyan Hat — Innovation & Feasibility"
+    emoji: "🩵"
+    number: 8
+    always_run: false
+    primary_model: "glm-5.1"
+    fallback_model: "minimax-m2.7"
+    temperature: 0.4
+    max_tokens: 4096
+    timeout_seconds: 150
+    triggers:
+      - "experiment"
+      - "prototype"
+      - "novel"
+      - "llm"
+      - "agent"
+      - "ml"
+      - "ai"
+    persona: |
+      You are CyanHat, an innovation and feasibility analyst. You evaluate
+      technical feasibility, risk/ROI analysis, and prototype validation
+      for experimental patterns and new technology stacks.
+
+  purple:
+    name: "Purple Hat — AI Safety & Alignment"
+    emoji: "🟪"
+    number: 9
+    always_run: true
+    primary_model: "glm-5.1"
+    fallback_model: "deepseek-v3.1"
+    temperature: 0.2
+    max_tokens: 4096
+    timeout_seconds: 150
+    triggers: []  # Always runs
+    persona: |
+      You are PurpleHat, an AI safety and alignment specialist. You evaluate
+      OWASP Agentic Top 10 compliance, bias detection, PII leakage risk,
+      and model alignment concerns in every code change.
+
+  orange:
+    name: "Orange Hat — DevOps & Automation"
+    emoji: "🟠"
+    number: 10
+    always_run: false
+    primary_model: "glm-5.1"
+    fallback_model: "nemotron-3-super"
+    temperature: 0.2
+    max_tokens: 4096
+    timeout_seconds: 90
+    triggers:
+      - "docker"
+      - "dockerfile"
+      - "ci"
+      - "workflow"
+      - "terraform"
+      - "helm"
+      - "k8s"
+      - "deploy"
+    persona: |
+      You are OrangeHat, a DevOps and automation specialist. You verify
+      CI/CD pipeline health, infrastructure-as-code quality, container security,
+      and deployment safety.
+
+  silver:
+    name: "Silver Hat — Context & Token Optimization"
+    emoji: "🪨"
+    number: 11
+    always_run: false
+    primary_model: "nemotron-3-nano"
+    fallback_model: "ministral-3"
+    temperature: 0.1
+    max_tokens: 2048
+    timeout_seconds: 60
+    triggers:
+      - "prompt"
+      - "context"
+      - "token"
+      - "rag"
+      - "embed"
+      - "vector"
+    persona: |
+      You are SilverHat, a context and token optimization specialist. You
+      analyze token counting, context compression, and hybrid retrieval
+      optimization for LLM-powered systems.
+
+  azure:
+    name: "Azure Hat — MCP & Protocol Integration"
+    emoji: "💎"
+    number: 12
+    always_run: false
+    primary_model: "glm-5.1"
+    fallback_model: "qwen3-coder"
+    temperature: 0.2
+    max_tokens: 4096
+    timeout_seconds: 120
+    triggers:
+      - "mcp"
+      - "tool"
+      - "function_call"
+      - "schema"
+      - "a2a"
+      - "protocol"
+    persona: |
+      You are AzureHat, an MCP and protocol integration specialist. You validate
+      MCP contracts, A2A schema enforcement, type safety, and tool-calling
+      correctness.
+
+  brown:
+    name: "Brown Hat — Data Governance & Privacy"
+    emoji: "🟤"
+    number: 13
+    always_run: false
+    primary_model: "glm-5.1"
+    fallback_model: "deepseek-v3.1"
+    temperature: 0.2
+    max_tokens: 4096
+    timeout_seconds: 120
+    triggers:
+      - "pii"
+      - "user"
+      - "data"
+      - "log"
+      - "store"
+      - "privacy"
+      - "gdpr"
+      - "personal"
+    persona: |
+      You are BrownHat, a data governance and privacy specialist. You verify
+      GDPR/CCPA/HIPAA compliance, data minimization, audit logging, and
+      PII handling practices.
+
+  gray:
+    name: "Gray Hat — Observability & Reliability"
+    emoji: "⚙️"
+    number: 14
+    always_run: false
+    primary_model: "glm-5.1"
+    fallback_model: "nemotron-3-super"
+    temperature: 0.3
+    max_tokens: 4096
+    timeout_seconds: 90
+    triggers:
+      - "trace"
+      - "metric"
+      - "log"
+      - "monitor"
+      - "alert"
+      - "sla"
+      - "slo"
+      - "latency"
+    persona: |
+      You are GrayHat, an observability and reliability specialist. You verify
+      distributed tracing, SLO/SLA monitoring, alerting, and latency budgeting
+      for production services.
+
+  teal:
+    name: "Teal Hat — Accessibility & Inclusion"
+    emoji: "♿"
+    number: 15
+    always_run: false
+    primary_model: "nemotron-3-super"
+    fallback_model: "ministral-3"
+    temperature: 0.1
+    max_tokens: 2048
+    timeout_seconds: 60
+    triggers:
+      - "ui"
+      - "html"
+      - "css"
+      - "render"
+      - "aria"
+      - "a11y"
+      - "i18n"
+      - "l10n"
+    persona: |
+      You are TealHat, an accessibility and inclusion specialist. You verify
+      WCAG compliance, screen-reader compatibility, and inclusive design
+      in UI changes and content generation.
+
+  steel:
+    name: "Steel Hat — Supply Chain & Dependencies"
+    emoji: "🔗"
+    number: 16
+    always_run: false
+    primary_model: "deepseek-v3.1"
+    fallback_model: "nemotron-3-nano"
+    temperature: 0.1
+    max_tokens: 2048
+    timeout_seconds: 60
+    triggers:
+      - "package.json"
+      - "requirements.txt"
+      - "Gemfile"
+      - "go.mod"
+      - "pom.xml"
+      - "Cargo.toml"
+      - "lockfile"
+      - "dependency"
+    persona: |
+      You are SteelHat, a supply chain and dependency security specialist.
+      You verify SBOM generation, vulnerability scanning, and license compliance
+      for all dependency changes.
+
+  chartreuse:
+    name: "Chartreuse Hat — Testing & Evaluation"
+    emoji: "🧪"
+    number: 17
+    always_run: false
+    primary_model: "glm-5.1"
+    fallback_model: "qwen3-coder"
+    temperature: 0.3
+    max_tokens: 4096
+    timeout_seconds: 120
+    triggers:
+      - "test"
+      - "spec"
+      - "assert"
+      - "expect"
+      - "mock"
+      - "fixture"
+      - "benchmark"
+    persona: |
+      You are ChartreuseHat, a testing and evaluation specialist. You verify
+      test coverage, RAGAS metrics, prompt evaluation quality, and regression
+      detection.
+
+  gold:
+    name: "Gold Hat — CoVE Final QA"
+    emoji: "✨"
+    number: 18
+    always_run: true
+    run_last: true
+    primary_model: "glm-5.1"
+    fallback_model: null  # CoVE must always use best available model
+    temperature: 0.2
+    max_tokens: 8192
+    timeout_seconds: 300
+    triggers: []  # Always runs last
+    persona: |
+      You are GoldHat (CoVE — Convergent Verification & Expert), the final
+      adjudicator. You synthesize all hat reports, resolve conflicts, compute
+      the composite risk score, and issue the final merge verdict:
+      ALLOW (score ≤ 20), ESCALATE (21–60), or QUARANTINE (> 60 or any CRITICAL).
+
+# Gate configuration per SPEC.md §7
+gates:
+  cost_budget:
+    max_tokens_per_pr: 150000
+    max_usd_per_pr: 0.15  # Ollama Cloud pricing — $0.15 covers ~18 hats
+  security_fast_path:
+    enabled: true
+    trigger_severity: "CRITICAL"
+  timeout:
+    default_per_hat_seconds: 120
+
+# Execution settings per SPEC.md §8
+execution:
+  strategy: "tiered_parallel"
+  max_concurrent_hats: 6
+  retry:
+    max_attempts: 3
+    initial_backoff_seconds: 1
+    backoff_multiplier: 2
+    max_backoff_seconds: 10
+
+# Risk score formula per CATALOG.md
+risk_score:
+  critical_weight: 20
+  critical_cap: 80
+  high_weight: 5
+  high_cap: 40
+  medium_weight: 1
+  medium_cap: 10
+  low_weight: 0.1
+  low_cap: 5
+  allow_threshold: 20
+  escalate_threshold: 60

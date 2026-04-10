@@ -1,0 +1,253 @@
+# 🎩 Hats Task Execution Workflow
+#
+# Handles task dispatches from external repos, agents, or the `hat` CLI.
+# Unlike hats-dispatch.yml (which reviews diffs), this workflow CREATES
+# deliverables: code, docs, plans, tests, etc.
+#
+# Trigger via GitHub API:
+#   gh api repos/YOUR_USERNAME/hat_stack/dispatches \
+#     -f event_type=run-task \
+#     -f client_payload[task]=generate_code \
+#     -f client_payload[prompt]="Build a FastAPI auth module with JWT" \
+#     -f client_payload[callback_repo]=owner/repo \
+#     -f client_payload[callback_pr]=42
+#
+# Or via the `hat` CLI wrapper:
+#   hat task generate_code "Build a FastAPI auth module with JWT" --repo owner/repo --pr 42
+
+name: "🎩 Hats Task Execution"
+
+on:
+  repository_dispatch:
+    types:
+      - run-task
+      - hat-task
+      - generate
+      - build
+  workflow_dispatch:
+    inputs:
+      task:
+        description: "Task type: generate_code, generate_docs, refactor, analyze, plan, test"
+        required: true
+        type: choice
+        options:
+          - generate_code
+          - generate_docs
+          - refactor
+          - analyze
+          - plan
+          - test
+      prompt:
+        description: "What you want done (natural language)"
+        required: true
+        type: string
+      hats:
+        description: "Comma-separated hat IDs (default: auto-select)"
+        required: false
+        type: string
+        default: ""
+      callback_repo:
+        description: "Repo to post results to (owner/name)"
+        required: false
+        type: string
+        default: ""
+      callback_pr:
+        description: "PR number to comment results on"
+        required: false
+        type: string
+        default: ""
+      callback_issue:
+        description: "Issue number to comment results on"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  execute-task:
+    name: "🎩 Execute Hat Task"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout hat_stack
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r scripts/requirements.txt
+
+      - name: Extract parameters
+        id: params
+        shell: bash
+        run: |
+          # Determine source: workflow_dispatch or repository_dispatch
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # workflow_dispatch inputs are controlled by the UI schema — safe
+            echo "task=${{ inputs.task }}" >> "$GITHUB_OUTPUT"
+            echo "hats=${{ inputs.hats }}" >> "$GITHUB_OUTPUT"
+            echo "callback_repo=${{ inputs.callback_repo }}" >> "$GITHUB_OUTPUT"
+            echo "callback_pr=${{ inputs.callback_pr }}" >> "$GITHUB_OUTPUT"
+            echo "callback_issue=${{ inputs.callback_issue }}" >> "$GITHUB_OUTPUT"
+            # Prompt may contain special chars — pass via env to avoid code injection
+            INPUT_PROMPT="${{ inputs.prompt }}" python3 -c "
+          import os, re
+          val = os.environ.get('INPUT_PROMPT', '')
+          sanitized = re.sub(r'[\r\n]', ' ', val).strip()
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f'prompt={sanitized}\n')
+          "
+          else
+            # repository_dispatch — extract from client_payload with sanitization
+            PAYLOAD='${{ toJson(github.event.client_payload) }}'
+            echo "$PAYLOAD" | python3 -c "
+          import json, sys, os, re
+
+          def sanitize(value):
+              '''Remove newlines and control chars to prevent output injection.'''
+              if not isinstance(value, str):
+                  value = str(value) if value is not None else ''
+              return re.sub(r'[\r\n]', ' ', value).strip()
+
+          try:
+              payload = json.load(sys.stdin)
+          except json.JSONDecodeError:
+              payload = {}
+          gh_output = os.environ['GITHUB_OUTPUT']
+          with open(gh_output, 'a') as f:
+              f.write(f\"task={sanitize(payload.get('task', 'analyze'))}\n\")
+              f.write(f\"prompt={sanitize(payload.get('prompt', ''))}\n\")
+              f.write(f\"hats={sanitize(payload.get('hats', ''))}\n\")
+              f.write(f\"callback_repo={sanitize(payload.get('callback_repo', ''))}\n\")
+              f.write(f\"callback_pr={sanitize(payload.get('callback_pr', ''))}\n\")
+              f.write(f\"callback_issue={sanitize(payload.get('callback_issue', ''))}\n\")
+              f.write(f\"context={sanitize(payload.get('context', ''))}\n\")
+          "
+          fi
+
+      - name: Fetch context from callback repo
+        id: context
+        if: steps.params.outputs.callback_repo != ''
+        env:
+          GH_TOKEN: ${{ secrets.HAT_STACK_CALLBACK_TOKEN }}
+        shell: bash
+        run: |
+          CALLBACK_REPO="${{ steps.params.outputs.callback_repo }}"
+          CONTEXT_DIR="/tmp/hats-context"
+          mkdir -p "$CONTEXT_DIR"
+
+          if [ -n "$GH_TOKEN" ]; then
+            # Try to fetch repo structure for context
+            echo "📁 Fetching context from $CALLBACK_REPO..."
+            # Get the repo's tree (top-level files)
+            curl -s -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/$CALLBACK_REPO/git/trees/HEAD?recursive=1" \
+              | python3 -c "
+          import json, sys
+          try:
+              data = json.load(sys.stdin)
+              tree = data.get('tree', [])
+              paths = [item['path'] for item in tree if item['type'] == 'blob']
+              with open('/tmp/hats-context/REPO_TREE.txt', 'w') as f:
+                  f.write('\n'.join(paths))
+              print(f'Found {len(paths)} files in repo tree')
+          except Exception as e:
+              print(f'Warning: Could not fetch repo tree: {e}', file=sys.stderr)
+          "
+          fi
+
+          echo "context_dir=$CONTEXT_DIR" >> "$GITHUB_OUTPUT"
+
+      - name: Run Hats Task
+        id: run
+        env:
+          OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
+          OLLAMA_BASE_URL: ${{ secrets.OLLAMA_BASE_URL || 'https://api.ollama.ai/v1' }}
+        shell: bash
+        run: |
+          ARGS=(
+            --task "${{ steps.params.outputs.task }}"
+            --prompt "${{ steps.params.outputs.prompt }}"
+            --config scripts/hat_configs.yml
+            --output /tmp/hats-task-output
+            --json-file /tmp/hats-task-result.json
+          )
+
+          if [ -n "${{ steps.params.outputs.hats }}" ]; then
+            ARGS+=(--hats "${{ steps.params.outputs.hats }}")
+          fi
+
+          if [ -d "/tmp/hats-context" ] && [ "$(ls -A /tmp/hats-context 2>/dev/null)" ]; then
+            ARGS+=(--context-dir /tmp/hats-context)
+          fi
+
+          set +e
+          python scripts/hats_task_runner.py "${ARGS[@]}"
+          EXIT_CODE=$?
+          set -e
+
+          echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
+
+          if [ -f /tmp/hats-task-result.json ]; then
+            FILES_GENERATED=$(python3 -c "import json; print(len(json.load(open('/tmp/hats-task-result.json')).get('files', [])))")
+            echo "files_generated=$FILES_GENERATED" >> "$GITHUB_OUTPUT"
+          else
+            echo "files_generated=0" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Post results to callback
+        if: steps.params.outputs.callback_repo != '' && (steps.params.outputs.callback_pr != '' || steps.params.outputs.callback_issue != '')
+        env:
+          GH_TOKEN: ${{ secrets.HAT_STACK_CALLBACK_TOKEN }}
+        shell: bash
+        run: |
+          CALLBACK_REPO="${{ steps.params.outputs.callback_repo }}"
+          CALLBACK_PR="${{ steps.params.outputs.callback_pr }}"
+          CALLBACK_ISSUE="${{ steps.params.outputs.callback_issue }}"
+          TARGET="${CALLBACK_PR:-$CALLBACK_ISSUE}"
+
+          if [ -z "$GH_TOKEN" ] || [ -z "$TARGET" ]; then
+            echo "⚠️ Cannot post results — missing token or target"
+            exit 0
+          fi
+
+          # Build comment from summary
+          if [ -f /tmp/hats-task-output/HATS_TASK_SUMMARY.md ]; then
+            REPORT_BODY=$(cat /tmp/hats-task-output/HATS_TASK_SUMMARY.md)
+          else
+            REPORT_BODY="🎩 Hats Task completed. Files generated: ${{ steps.run.outputs.files_generated }}"
+          fi
+
+          python3 -c "
+          import json, sys
+          body = sys.stdin.read()
+          print(json.dumps({'body': body}))
+          " <<< "$REPORT_BODY" | curl -s -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$CALLBACK_REPO/issues/$TARGET/comments" \
+            -d @-
+
+          echo "✅ Results posted to $CALLBACK_REPO#$TARGET"
+
+      - name: Upload task output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hats-task-output
+          path: /tmp/hats-task-output/
+          retention-days: 30
+
+      - name: Upload JSON result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hats-task-result
+          path: /tmp/hats-task-result.json
+          retention-days: 30
