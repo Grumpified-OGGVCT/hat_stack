@@ -695,6 +695,8 @@ def run_task_pipeline(config: dict, task_type: str, user_prompt: str,
         total_tokens["input"] += r["token_usage"]["input"]
         total_tokens["output"] += r["token_usage"]["output"]
 
+    # Treat the task as failed only when the primary generation failed outright;
+    # supporting/gold hat errors should surface as warnings if deliverables still exist.
     primary_failed = bool(primary_result["error"]) and not primary_result["files"]
     had_any_errors = any(result["error"] for result in all_results)
     if primary_failed:

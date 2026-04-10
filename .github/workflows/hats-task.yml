@@ -123,6 +123,8 @@ jobs:
             python3 -c "
           import os, re
           def sanitize(value):
+              if not value:
+                  return ''
               return re.sub(r'[\r\n]', ' ', value).strip()
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
               f.write(f\"prompt={sanitize(os.environ.get('INPUT_PROMPT', ''))}\n\")
