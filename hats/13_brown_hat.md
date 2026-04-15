@@ -179,6 +179,18 @@ Scenarios to be illustrated:
 | **GDPR/CCPA/HIPAA regulatory knowledge** | Legal basis assessment and compliance requirements |
 | **Encryption library expertise** (`cryptography`, `openssl`) | Field-level encryption implementation review |
 
+## Ollama Cloud Model Assignment
+
+| Role | Model | Context Window | SWE-bench |
+|------|-------|---------------|-----------|
+| Primary | deepseek-v3.2:cloud | 128K | ~67% |
+| Fallback | glm-5.1:cloud | 200K | ~77% |
+| Local (sensitive mode) | deepseek-r1:8b | 128K | ~42% |
+
+**Security Mode:** When sensitive content (credentials, PII, auth tokens) is detected in the diff, this hat automatically switches to its local model. No exceptions.
+
+---
+
 ## References
 
 - [GDPR Official Text (EUR-Lex)](https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX%3A32016R0679)

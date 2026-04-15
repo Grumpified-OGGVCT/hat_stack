@@ -26,7 +26,16 @@ secrets/
 # Hats runtime output (may contain sensitive review data)
 hats-report.json
 hats-report.md
+hats_output/
+hats_report*
+.hats/
 /tmp/hats-*
+
+# MCP server build output
+mcp/dist/
+
+# Node modules
+node_modules/
 
 # =============================================================================
 # Python

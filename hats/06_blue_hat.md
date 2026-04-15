@@ -169,6 +169,18 @@ Categories to be illustrated:
 | **ADR parsing tools** | Reading and cross-referencing Architecture Decision Records |
 | **CI configuration analysis** | Verifying that required CI checks are configured |
 
+## Ollama Cloud Model Assignment
+
+| Role | Model | Context Window | SWE-bench |
+|------|-------|---------------|-----------|
+| Primary | phi4-mini:3.8b | 128K | ~30% |
+| Fallback | gemma3:4b | 128K | ~28% |
+| Local (sensitive mode) | phi4-mini:3.8b | 128K | ~30% |
+
+**Security Mode:** Always runs locally. Never sends data to cloud APIs. No exceptions.
+
+---
+
 ## References
 
 - [Conventional Commits Specification](https://www.conventionalcommits.org/)

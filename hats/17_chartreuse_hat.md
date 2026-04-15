@@ -170,6 +170,18 @@ Scenarios to be illustrated:
 | **`flaky` test detection** (`pytest-repeat`, `pytest-flakefinder`) | Identifying non-deterministic tests |
 | **Benchmarking frameworks** (`pytest-benchmark`, `criterion`, `hyperfine`) | Performance regression detection |
 
+## Ollama Cloud Model Assignment
+
+| Role | Model | Context Window | SWE-bench |
+|------|-------|---------------|-----------|
+| Primary | qwen3-coder:480b-cloud | 256K | ~65% |
+| Fallback | devstral-2:123b-cloud | 256K | 72.2% |
+| Local (sensitive mode) | N/A -- always cloud | N/A | N/A |
+
+**Security Mode:** Cloud-only. No sensitive content processing -- see Black/Purple/Brown hats for credential analysis.
+
+---
+
 ## References
 
 - [RAGAS — RAG Evaluation Framework](https://docs.ragas.io/)

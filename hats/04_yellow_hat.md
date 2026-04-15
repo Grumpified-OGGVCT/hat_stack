@@ -172,6 +172,18 @@ Patterns to be illustrated:
 | **A2A protocol patterns** (Google ADK) | Agent-to-agent task delegation and result aggregation |
 | **Event-driven architecture patterns** | Event sourcing, CQRS, saga pattern for decoupling |
 
+## Ollama Cloud Model Assignment
+
+| Role | Model | Context Window | SWE-bench |
+|------|-------|---------------|-----------|
+| Primary | glm-5.1:cloud | 200K | ~77% |
+| Fallback | minimax-m2.7:cloud | 200K | ~78% |
+| Local (sensitive mode) | N/A -- always cloud | N/A | N/A |
+
+**Security Mode:** Cloud-only. No sensitive content processing -- see Black/Purple/Brown hats for credential analysis.
+
+---
+
 ## References
 
 - [A2A (Agent-to-Agent) Protocol Specification](https://google.github.io/A2A/)

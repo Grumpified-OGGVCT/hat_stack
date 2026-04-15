@@ -183,6 +183,18 @@ Categories to be illustrated:
 | **Node.js `heapdump`** | Heap snapshot analysis for Node.js memory leaks |
 | **Algorithm complexity analysis** | Big-O analysis of sorting, searching, and data structure operations |
 
+## Ollama Cloud Model Assignment
+
+| Role | Model | Context Window | SWE-bench |
+|------|-------|---------------|-----------|
+| Primary | phi4-mini:3.8b | 128K | ~30% |
+| Fallback | gemma3:4b | 128K | ~28% |
+| Local (sensitive mode) | phi4-mini:3.8b | 128K | ~30% |
+
+**Security Mode:** Always runs locally. Never sends data to cloud APIs. No exceptions.
+
+---
+
 ## References
 
 - [OpenAI Tokenizer (tiktoken)](https://github.com/openai/tiktoken)

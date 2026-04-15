@@ -168,6 +168,18 @@ Scenarios to be illustrated:
 | **Protocol Buffers / gRPC reflection** | Protobuf schema validation and type-safety analysis |
 | **Pydantic v2** | Python type-safe schema definition and runtime validation |
 
+## Ollama Cloud Model Assignment
+
+| Role | Model | Context Window | SWE-bench |
+|------|-------|---------------|-----------|
+| Primary | qwen3-coder:480b-cloud | 256K | ~65% |
+| Fallback | devstral-2:123b-cloud | 256K | 72.2% |
+| Local (sensitive mode) | N/A -- always cloud | N/A | N/A |
+
+**Security Mode:** Cloud-only. No sensitive content processing -- see Black/Purple/Brown hats for credential analysis.
+
+---
+
 ## References
 
 - [Model Context Protocol (MCP) Specification](https://modelcontextprotocol.io/)

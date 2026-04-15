@@ -171,6 +171,18 @@ Scenarios to be illustrated:
 | **Distributed-systems monitoring patterns** | Golden Signals, USE method, RED method |
 | **SLO/SLI/SLA methodology** | Error budget calculation and burn-rate alerting |
 
+## Ollama Cloud Model Assignment
+
+| Role | Model | Context Window | SWE-bench |
+|------|-------|---------------|-----------|
+| Primary | nematron-3-super:cloud | 1M | 60.5% |
+| Fallback | glm-5.1:cloud | 200K | ~77% |
+| Local (sensitive mode) | N/A -- always cloud | N/A | N/A |
+
+**Security Mode:** Cloud-only. No sensitive content processing -- see Black/Purple/Brown hats for credential analysis.
+
+---
+
 ## References
 
 - [OpenTelemetry Documentation](https://opentelemetry.io/docs/)

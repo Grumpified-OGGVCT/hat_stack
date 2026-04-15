@@ -210,6 +210,18 @@ Scenarios to be illustrated:
 | **Release-gate UI integration** | Posting findings to PR comments, Slack, and dashboards |
 | **HITL escalation framework** | Routing ESCALATE decisions to the correct reviewer tier |
 
+## Ollama Cloud Model Assignment
+
+| Role | Model | Context Window | SWE-bench |
+|------|-------|---------------|-----------|
+| Primary | glm-5.1:cloud | 200K | ~77% |
+| Fallback | kimi-k2.5:cloud | 128K | 76.8% |
+| Local (sensitive mode) | N/A -- always cloud | N/A | N/A |
+
+**Security Mode:** Cloud-only. No sensitive content processing -- see Black/Purple/Brown hats for credential analysis.
+
+---
+
 ## References
 
 - [LangGraph — Multi-Agent Orchestration](https://langchain-ai.github.io/langgraph/)

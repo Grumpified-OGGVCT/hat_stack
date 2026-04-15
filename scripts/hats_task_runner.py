@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """
-🎩 Hats Task Runner — Agentic Task Execution via Hat Expertise
+Hats Task Runner -- Agentic Task Execution via Hat Expertise
 
 Goes beyond PR review: uses the Hats model pool to *do work* on projects.
 Your local agent (e.g., GitHub Copilot in VS Code) dispatches tasks here,
 and hat_stack executes them using the right hat expertise and model tier.
 
 Supported task types:
-  - generate_code    — Build modules, functions, classes, APIs
-  - generate_docs    — Write documentation, READMEs, ADRs, specs
-  - refactor         — Restructure, optimize, or modernize existing code
-  - analyze          — Deep analysis with a written report (architecture, security, etc.)
-  - plan             — Create implementation plans, roadmaps, task breakdowns
-  - test             — Generate test suites, test cases, fixtures
-  - review           — Review code/diff (delegates to hats_runner for structured review)
+  - generate_code    -- Build modules, functions, classes, APIs
+  - generate_docs    -- Write documentation, READMEs, ADRs, specs
+  - refactor         -- Restructure, optimize, or modernize existing code
+  - analyze          -- Deep analysis with a written report (architecture, security, etc.)
+  - plan             -- Create implementation plans, roadmaps, task breakdowns
+  - test             -- Generate test suites, test cases, fixtures
+  - review           -- Review code/diff (delegates to hats_runner for structured review)
 
 Usage:
   python hats_task_runner.py \\
@@ -25,8 +25,8 @@ Usage:
     --output /tmp/hats-task-output
 
 Environment:
-  OLLAMA_API_KEY   — Ollama Cloud API key (required)
-  OLLAMA_BASE_URL  — API base URL (default: https://api.ollama.ai/v1)
+  OLLAMA_API_KEY   -- Ollama Cloud API key (required)
+  OLLAMA_BASE_URL  -- API base URL (default: https://api.ollama.ai/v1)
 """
 
 import argparse
@@ -42,10 +42,20 @@ from pathlib import Path
 import requests
 import yaml
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-DEFAULT_CONFIG = SCRIPT_DIR / "hat_configs.yml"
+# Shared modules
+from hats_common import (
+    load_config,
+    call_ollama,
+    detect_sensitive_mode,
+    build_comparable_model_sequence,
+    estimate_cost,
+    preflight_check,
+    DEFAULT_CONFIG,
+)
 
-# Task type → which hats are most useful + what system role to use
+SCRIPT_DIR = Path(__file__).resolve().parent
+
+# Task type -> which hats are most useful + what system role to use
 TASK_PROFILES = {
     "generate_code": {
         "description": "Generate code: modules, functions, classes, APIs",
@@ -89,6 +99,13 @@ TASK_PROFILES = {
         "model_tier": 2,
         "output_type": "code",
     },
+    "review": {
+        "description": "Review code/diff (structured review via hat expertise)",
+        "recommended_hats": ["black", "blue", "purple", "red", "gold"],
+        "primary_hat": "black",  # Black Hat = security-first review
+        "model_tier": 1,
+        "output_type": "markdown",
+    },
 }
 
 DEFAULT_CATEGORIES = {
@@ -98,14 +115,15 @@ DEFAULT_CATEGORIES = {
     "analyze": "analysis",
     "plan": "plans",
     "test": "tests",
+    "review": "review",
 }
 
 # ---------------------------------------------------------------------------
-# Task-mode system prompts — transform hats from reviewers to builders
+# Task-mode system prompts -- transform hats from reviewers to builders
 # ---------------------------------------------------------------------------
 
 _TASK_SYSTEM_PREFIX = """\
-You are operating in TASK MODE — you are not reviewing code, you are CREATING deliverables.
+You are operating in TASK MODE -- you are not reviewing code, you are CREATING deliverables.
 Your output will be used directly in a project. Be thorough, production-quality, and complete.
 """
 
@@ -139,12 +157,6 @@ Respond with a JSON object:
 }
 """,
 }
-
-
-def load_config(config_path: str | Path) -> dict:
-    """Load hat configuration from YAML file."""
-    with open(config_path, "r", encoding="utf-8") as fh:
-        return yaml.safe_load(fh)
 
 
 def slugify_path_component(value: str | None, default: str) -> str:
@@ -361,118 +373,34 @@ def write_workspace_indexes(workspace_root: Path):
     )
 
 
-def call_ollama(config: dict, model: str, system_prompt: str, user_prompt: str,
-                temperature: float = 0.3, max_tokens: int = 8192,
-                timeout: int = 300) -> dict:
-    """Call the Ollama Cloud API."""
-    api_cfg = config["api"]
-    base_url = os.environ.get(
-        api_cfg.get("base_url_env", "OLLAMA_BASE_URL"),
-        api_cfg.get("default_base_url", "https://api.ollama.ai/v1"),
-    )
-    api_key = os.environ.get(
-        api_cfg.get("api_key_env", "OLLAMA_API_KEY"), ""
-    )
-
-    if not api_key:
-        return {"error": "OLLAMA_API_KEY not set", "model": model, "content": None,
-                "usage": {"input": 0, "output": 0}}
-
-    url = f"{base_url.rstrip('/')}/chat/completions"
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    payload = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-        "response_format": {"type": "json_object"},
-    }
-
-    try:
-        resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
-        resp.raise_for_status()
-        data = resp.json()
-        choice = data.get("choices", [{}])[0]
-        usage = data.get("usage", {})
-        return {
-            "error": None, "model": model,
-            "content": choice.get("message", {}).get("content", ""),
-            "usage": {"input": usage.get("prompt_tokens", 0),
-                      "output": usage.get("completion_tokens", 0)},
-        }
-    except requests.exceptions.Timeout:
-        return {"error": f"Timeout after {timeout}s", "model": model,
-                "content": None, "usage": {"input": 0, "output": 0}}
-    except requests.exceptions.RequestException as exc:
-        return {"error": str(exc), "model": model,
-                "content": None, "usage": {"input": 0, "output": 0}}
-
-
 def select_model_for_task(config: dict, hat_id: str, task_type: str) -> str:
     """Select the best model for a task, using task tier to pick model quality.
 
-    Tier 1 tasks (generate_code, analyze, refactor) use Tier 1 models (e.g. glm-5.1).
-    Tier 2+ tasks (generate_docs, plan, test) use the hat's assigned primary_model.
+    Tier 1 tasks (generate_code, analyze, refactor, review) use Tier 1 models.
+    Tier 2+ tasks use the hat's assigned primary_model.
+    Respects local_only hats.
     """
     hats_cfg = config["hats"]
     hat_def = hats_cfg.get(hat_id, {})
     profile = TASK_PROFILES.get(task_type, {})
     models_cfg = config.get("models", {})
 
+    # Local-only hats always use their local model
+    if hat_def.get("local_only"):
+        return hat_def["primary_model"]
+
     # For Tier 1 tasks, pick the best available Tier 1 model
     if profile.get("model_tier", 2) == 1:
-        # Prefer the hat's own primary if it's already Tier 1
-        hat_model = hat_def.get("primary_model", "glm-5.1")
+        hat_model = hat_def.get("primary_model", "glm-5.1:cloud")
         model_info = models_cfg.get(hat_model, {})
         if model_info.get("tier") == 1:
             return hat_model
-        # Otherwise find a Tier 1 model from the config
         for model_name, model_meta in models_cfg.items():
             if model_meta.get("tier") == 1:
                 return model_name
-        return "glm-5.1"  # ultimate fallback
+        return "glm-5.1:cloud"
 
-    # For Tier 2+ tasks, use the hat's assigned primary model
-    return hat_def.get("primary_model", "nemotron-3-super")
-
-
-def build_comparable_model_sequence(
-    config: dict,
-    primary_model: str,
-    fallback_model: str | None = None,
-) -> list[str]:
-    """Build a prioritized model fallback list using comparable configured tiers."""
-    models_cfg = config.get("models", {})
-    seen = set()
-    ordered_models = []
-
-    def add(model_name: str | None):
-        if model_name and model_name in models_cfg and model_name not in seen:
-            ordered_models.append(model_name)
-            seen.add(model_name)
-
-    add(primary_model)
-    add(fallback_model)
-
-    primary_tier = models_cfg.get(primary_model, {}).get("tier")
-    fallback_tier = models_cfg.get(fallback_model, {}).get("tier") if fallback_model else None
-
-    for model_name, model_meta in models_cfg.items():
-        if model_meta.get("tier") == primary_tier:
-            add(model_name)
-
-    if fallback_tier and fallback_tier != primary_tier:
-        for model_name, model_meta in models_cfg.items():
-            if model_meta.get("tier") == fallback_tier:
-                add(model_name)
-
-    for model_name in models_cfg:
-        add(model_name)
-
-    return ordered_models
+    return hat_def.get("primary_model", "nemotron-3-super:cloud")
 
 
 def build_task_prompt(config: dict, hat_id: str, task_type: str,
@@ -486,14 +414,12 @@ def build_task_prompt(config: dict, hat_id: str, task_type: str,
     profile = TASK_PROFILES.get(task_type, {})
     output_type = profile.get("output_type", "markdown")
 
-    # System prompt: task mode prefix + hat persona + output schema
     system = (
         _TASK_SYSTEM_PREFIX + "\n"
         + hat_def.get("persona", "You are an expert software engineer.").strip() + "\n\n"
         + _OUTPUT_SCHEMAS.get(output_type, _OUTPUT_SCHEMAS["markdown"])
     )
 
-    # User prompt: the actual task + any context files
     user = f"## Task\n\n{user_prompt}\n"
     if context_files:
         user += "\n## Existing Project Files (for context)\n\n"
@@ -527,8 +453,9 @@ def run_task_hat(config: dict, hat_id: str, task_type: str,
         result = call_ollama(
             config, candidate_model, system_prompt, full_user_prompt,
             temperature=hat_def.get("temperature", 0.3),
-            max_tokens=8192,  # Task mode needs more output room
+            max_tokens=8192,
             timeout=hat_def.get("timeout_seconds", 300),
+            hat_id=hat_id,
         )
         if not result["error"]:
             break
@@ -539,7 +466,7 @@ def run_task_hat(config: dict, hat_id: str, task_type: str,
     report = {
         "hat_id": hat_id,
         "hat_name": hat_def.get("name", hat_id),
-        "emoji": hat_def.get("emoji", "🎩"),
+        "emoji": hat_def.get("emoji", ""),
         "model_used": result["model"],
         "attempted_models": attempted_models,
         "latency_seconds": round(elapsed, 2),
@@ -557,7 +484,6 @@ def run_task_hat(config: dict, hat_id: str, task_type: str,
             report["summary"] = parsed.get("summary", "")
             report["notes"] = parsed.get("notes", [])
         except json.JSONDecodeError:
-            # Wrap raw output as a single markdown file
             report["files"] = [{
                 "path": "output.md",
                 "content": result["content"],
@@ -567,7 +493,7 @@ def run_task_hat(config: dict, hat_id: str, task_type: str,
 
     if fallback_used:
         report["notes"].append(
-            f"Primary model fallback used: {attempted_models[0]} → {report['model_used']}"
+            f"Primary model fallback used: {attempted_models[0]} -> {report['model_used']}"
         )
 
     return report
@@ -585,8 +511,8 @@ def run_task_pipeline(config: dict, task_type: str, user_prompt: str,
     """
     profile = TASK_PROFILES.get(task_type)
     if not profile:
-        print(f"❌ Unknown task type: {task_type}", file=sys.stderr)
-        print(f"   Available: {', '.join(TASK_PROFILES.keys())}", file=sys.stderr)
+        print(f"Unknown task type: {task_type}", file=sys.stderr)
+        print(f"Available: {', '.join(TASK_PROFILES.keys())}", file=sys.stderr)
         sys.exit(2)
 
     # Select hats
@@ -598,25 +524,24 @@ def run_task_pipeline(config: dict, task_type: str, user_prompt: str,
     primary_hat = hat_ids[0] if requested_hats and len(requested_hats) > 0 else profile["primary_hat"]
     supporting_hats = [h for h in hat_ids if h != primary_hat and h != "gold"]
 
-    print(f"🎩 Task: {profile['description']}", file=sys.stderr)
-    print(f"🎩 Primary hat: {primary_hat}", file=sys.stderr)
-    print(f"🎩 Supporting hats: {', '.join(supporting_hats) or 'none'}", file=sys.stderr)
+    print(f"Task: {profile['description']}", file=sys.stderr)
+    print(f"Primary hat: {primary_hat}", file=sys.stderr)
+    print(f"Supporting hats: {', '.join(supporting_hats) or 'none'}", file=sys.stderr)
 
     # Step 1: Primary hat generates the main deliverable
-    print(f"\n📝 Phase 1: Generating with {primary_hat}...", file=sys.stderr)
+    print(f"\nPhase 1: Generating with {primary_hat}...", file=sys.stderr)
     primary_result = run_task_hat(config, primary_hat, task_type, user_prompt, context_files)
     print(f"  {primary_result['emoji']} {primary_result['hat_name']}: "
           f"{len(primary_result['files'])} files, {primary_result['latency_seconds']:.1f}s"
-          + (f" ⚠️ {primary_result['error']}" if primary_result['error'] else ""),
+          + (f" ERROR: {primary_result['error']}" if primary_result['error'] else ""),
           file=sys.stderr)
 
     # Step 2: Supporting hats review/enhance (parallel)
     supporting_results = []
     if supporting_hats and primary_result["files"]:
-        print(f"\n🔍 Phase 2: Review/enhance with {len(supporting_hats)} supporting hats...",
+        print(f"\nPhase 2: Review/enhance with {len(supporting_hats)} supporting hats...",
               file=sys.stderr)
 
-        # Build a review prompt from the primary output
         review_context = json.dumps({
             "primary_hat": primary_hat,
             "task_type": task_type,
@@ -632,7 +557,7 @@ def run_task_pipeline(config: dict, task_type: str, user_prompt: str,
             f"If you have file improvements, include them in your response."
         )
 
-        max_workers = min(len(supporting_hats), config["execution"]["max_concurrent_hats"])
+        max_workers = min(len(supporting_hats), config.get("execution", {}).get("max_concurrent_hats", 6))
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
             futures = {
                 pool.submit(run_task_hat, config, hat_id, "analyze", review_prompt, context_files): hat_id
@@ -646,7 +571,7 @@ def run_task_pipeline(config: dict, task_type: str, user_prompt: str,
                     result = {
                         "hat_id": hat_id,
                         "hat_name": config["hats"].get(hat_id, {}).get("name", hat_id),
-                        "emoji": config["hats"].get(hat_id, {}).get("emoji", "🎩"),
+                        "emoji": config["hats"].get(hat_id, {}).get("emoji", ""),
                         "model_used": "N/A",
                         "latency_seconds": 0,
                         "token_usage": {"input": 0, "output": 0},
@@ -656,13 +581,13 @@ def run_task_pipeline(config: dict, task_type: str, user_prompt: str,
                 supporting_results.append(result)
                 print(f"  {result['emoji']} {result['hat_name']}: "
                       f"{len(result['notes'])} notes, {result['latency_seconds']:.1f}s"
-                      + (f" ⚠️ {result['error']}" if result['error'] else ""),
+                      + (f" ERROR: {result['error']}" if result['error'] else ""),
                       file=sys.stderr)
 
     # Step 3: Gold Hat final QA (if in hat list)
     gold_result = None
     if "gold" in hat_ids:
-        print(f"\n✨ Phase 3: Gold Hat final QA...", file=sys.stderr)
+        print(f"\nPhase 3: Gold Hat final QA...", file=sys.stderr)
         gold_context = json.dumps({
             "task_type": task_type,
             "primary_output": {"hat": primary_hat, "files": primary_result["files"]},
@@ -695,8 +620,6 @@ def run_task_pipeline(config: dict, task_type: str, user_prompt: str,
         total_tokens["input"] += r["token_usage"]["input"]
         total_tokens["output"] += r["token_usage"]["output"]
 
-    # Treat the task as failed only when the primary generation failed outright;
-    # supporting/gold hat errors should surface as warnings if deliverables still exist.
     primary_failed = primary_result["error"] and not primary_result["files"]
     had_any_errors = any(result["error"] for result in all_results)
     if primary_failed:
@@ -747,10 +670,10 @@ def write_output_files(
         filepath = safe_output_path(out, file_entry["path"])
         filepath.parent.mkdir(parents=True, exist_ok=True)
         filepath.write_text(file_entry["content"], encoding="utf-8")
-        print(f"  📄 {filepath}", file=sys.stderr)
+        print(f"  {filepath}", file=sys.stderr)
 
     # Write summary
-    summary_lines = [f"# 🎩 Hats Task Output\n"]
+    summary_lines = [f"# Hats Task Output\n"]
     summary_lines.append(f"**Task:** {task_result['task_type']}")
     summary_lines.append(f"**Primary Hat:** {task_result['primary_hat']}")
     summary_lines.append(f"**Summary:** {task_result['summary']}\n")
@@ -758,7 +681,7 @@ def write_output_files(
     if task_result["files"]:
         summary_lines.append("## Generated Files\n")
         for f in task_result["files"]:
-            summary_lines.append(f"- `{f['path']}` — {f.get('description', '')}")
+            summary_lines.append(f"- `{f['path']}` -- {f.get('description', '')}")
 
     if task_result["notes"]:
         summary_lines.append("\n## Notes\n")
@@ -773,12 +696,12 @@ def write_output_files(
 
     summary_path = out / "HATS_TASK_SUMMARY.md"
     summary_path.write_text("\n".join(summary_lines), encoding="utf-8")
-    print(f"  📋 {summary_path}", file=sys.stderr)
+    print(f"  {summary_path}", file=sys.stderr)
 
     # Write JSON report
     json_path = out / "hats_task_result.json"
     json_path.write_text(json.dumps(task_result, indent=2), encoding="utf-8")
-    print(f"  📊 {json_path}", file=sys.stderr)
+    print(f"  {json_path}", file=sys.stderr)
 
     if workspace_info and workspace_info.get("workspace_root"):
         manifest = build_run_manifest(
@@ -792,7 +715,7 @@ def write_output_files(
         )
         manifest_path = out / "PLAYGROUND_MANIFEST.json"
         manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-        print(f"  🗂️ {manifest_path}", file=sys.stderr)
+        print(f"  {manifest_path}", file=sys.stderr)
         write_workspace_indexes(workspace_info["workspace_root"])
 
 
@@ -802,7 +725,7 @@ def write_output_files(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="🎩 Hats Task Runner — execute agentic tasks using hat expertise"
+        description="Hats Task Runner -- execute agentic tasks using hat expertise"
     )
     parser.add_argument(
         "--task", required=True,
@@ -889,10 +812,13 @@ def main():
             )
 
     # Preflight
-    api_key = os.environ.get("OLLAMA_API_KEY", "").strip()
-    if not api_key:
-        print("❌ OLLAMA_API_KEY is not set.", file=sys.stderr)
-        print("   See FORK_SETUP.md for setup instructions.", file=sys.stderr)
+    issues = preflight_check()
+    has_errors = any("not set" in msg.lower() or "OLLAMA_API_KEY" in msg for msg in issues)
+    for msg in issues:
+        print(msg, file=sys.stderr)
+    if has_errors:
+        print("\nCannot proceed -- set OLLAMA_API_KEY.", file=sys.stderr)
+        print("See FORK_SETUP.md for setup instructions.", file=sys.stderr)
         sys.exit(2)
 
     config = load_config(args.config)
@@ -904,12 +830,12 @@ def main():
         if context_dir.is_dir():
             context_files = {}
             for p in sorted(context_dir.rglob("*")):
-                if p.is_file() and p.stat().st_size < 50000:  # Skip huge files
+                if p.is_file() and p.stat().st_size < 50000:
                     try:
                         context_files[str(p.relative_to(context_dir))] = p.read_text(encoding="utf-8")
                     except (UnicodeDecodeError, PermissionError):
                         pass
-            print(f"📁 Loaded {len(context_files)} context files from {context_dir}",
+            print(f"Loaded {len(context_files)} context files from {context_dir}",
                   file=sys.stderr)
 
     requested_hats = None
@@ -924,7 +850,7 @@ def main():
     )
 
     # Write outputs
-    print(f"\n📦 Writing output to {output_dir}/", file=sys.stderr)
+    print(f"\nWriting output to {output_dir}/", file=sys.stderr)
     write_output_files(
         result,
         output_dir,
@@ -947,7 +873,7 @@ def main():
             fh.write(f"files_generated={len(result['files'])}\n")
             fh.write(f"hats_executed={result['stats']['hats_executed']}\n")
 
-    print(f"\n✅ Task complete: {len(result['files'])} files generated, "
+    print(f"\nTask complete: {len(result['files'])} files generated, "
           f"{result['stats']['hats_executed']} hats used", file=sys.stderr)
 
 

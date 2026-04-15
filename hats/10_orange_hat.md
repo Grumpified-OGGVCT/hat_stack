@@ -167,6 +167,18 @@ Scenarios to be illustrated:
 | **Kubernetes manifest validators** (`kubeconform`, `kube-score`) | Kubernetes resource validation |
 | **Argo Workflows** | CI/CD workflow definition and execution |
 
+## Ollama Cloud Model Assignment
+
+| Role | Model | Context Window | SWE-bench |
+|------|-------|---------------|-----------|
+| Primary | glm-5.1:cloud | 200K | ~77% |
+| Fallback | deepseek-v3.2:cloud | 128K | ~67% |
+| Local (sensitive mode) | N/A -- always cloud | N/A | N/A |
+
+**Security Mode:** Cloud-only. No sensitive content processing -- see Black/Purple/Brown hats for credential analysis.
+
+---
+
 ## References
 
 - [actionlint — GitHub Actions Linter](https://github.com/rhysd/actionlint)

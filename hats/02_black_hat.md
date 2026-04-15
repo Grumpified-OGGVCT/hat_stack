@@ -197,6 +197,18 @@ Categories to be illustrated:
 | **STRIDE / DREAD threat modeling** | Structured threat enumeration and risk scoring |
 | **Pen-testing methodology** | Exploit path construction and scenario analysis |
 
+## Ollama Cloud Model Assignment
+
+| Role | Model | Context Window | SWE-bench |
+|------|-------|---------------|-----------|
+| Primary | devstral-2:123b-cloud | 256K | 72.2% |
+| Fallback | kimi-k2.5:cloud | 128K | 76.8% |
+| Local (sensitive mode) | gemma3:12b | 128K | ~45% |
+
+**Security Mode:** When sensitive content (credentials, PII, auth tokens) is detected in the diff, this hat automatically switches to its local model. No exceptions.
+
+---
+
 ## References
 
 - [OWASP GenAI Top 10 (2025)](https://owasp.org/www-project-top-10-for-large-language-model-applications/)

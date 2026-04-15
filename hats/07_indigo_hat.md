@@ -159,6 +159,18 @@ Patterns to be illustrated:
 | **LangGraph macro-graph analysis** | Graph-based dependency analysis for agentic pipeline architectures |
 | **Module boundary analysis tools** | `dependency-cruiser` (JS/TS), `import-linter` (Python), `ArchUnit` (Java) |
 
+## Ollama Cloud Model Assignment
+
+| Role | Model | Context Window | SWE-bench |
+|------|-------|---------------|-----------|
+| Primary | devstral-2:123b-cloud | 256K | 72.2% |
+| Fallback | deepseek-v3.2:cloud | 128K | ~67% |
+| Local (sensitive mode) | N/A -- always cloud | N/A | N/A |
+
+**Security Mode:** Cloud-only. No sensitive content processing -- see Black/Purple/Brown hats for credential analysis.
+
+---
+
 ## References
 
 - [Architecture Decision Records (ADR)](https://adr.github.io/)

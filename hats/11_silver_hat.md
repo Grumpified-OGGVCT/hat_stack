@@ -173,6 +173,18 @@ Scenarios to be illustrated:
 | **RAGAS retrieval metrics** | Context precision, context recall, and answer relevancy measurement |
 | **Cross-encoder rerankers** (`cross-encoder/ms-marco-*`) | Retrieved document quality reranking |
 
+## Ollama Cloud Model Assignment
+
+| Role | Model | Context Window | SWE-bench |
+|------|-------|---------------|-----------|
+| Primary | gemma3:4b | 128K | ~28% |
+| Fallback | phi4-mini:3.8b | 128K | ~30% |
+| Local (sensitive mode) | gemma3:4b | 128K | ~28% |
+
+**Security Mode:** Always runs locally. Never sends data to cloud APIs. No exceptions.
+
+---
+
 ## References
 
 - [tiktoken — OpenAI Tokenizer](https://github.com/openai/tiktoken)

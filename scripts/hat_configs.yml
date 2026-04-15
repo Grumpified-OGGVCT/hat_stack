@@ -1,12 +1,19 @@
-# 🎩 Hat-to-Model Configuration
-# Based on HATS_TEAM_IMPLEMENTATION_GUIDE.md §E2.2 and §E3.1
-# Models reference Ollama Cloud (OpenAI-compatible API)
+# Hat-to-Model Configuration
+# Based on HATS_TEAM_IMPLEMENTATION_GUIDE.md + soul.md model pool merge
+# Models reference Ollama Cloud (OpenAI-compatible API) for cloud models
+# and Ollama local for local-only models
 #
-# Model options per the guide's 29-model inventory:
-#   Tier 1 (Critical Reasoning): glm-5.1:cloud, kimi-k2.5:cloud
-#   Tier 2 (Architectural):      glm-5.1:cloud, deepseek-v3.1:cloud, minimax-m2.7:cloud
-#   Tier 3 (Quality Analysis):   nemotron-3-super:cloud, qwen3-coder:cloud
-#   Tier 4 (Fast Scanning):      nemotron-3-nano:cloud, ministral-3:cloud
+# Model pool per soul.md (April 2026):
+#   Tier 1 (Critical Reasoning): glm-5.1:cloud, kimi-k2.5:cloud, deepseek-v3.2:cloud
+#   Tier 2 (Architectural):       minimax-m2.7:cloud, devstral-2:123b-cloud
+#   Tier 3 (Quality Analysis):    nemotron-3-super:cloud, qwen3-coder:480b-cloud
+#   Tier 4 (Fast Scanning):       nemotron-3-nano:cloud, ministral-3:cloud
+#   Tier L (Local Only):          phi4-mini:3.8b, gemma3:4b, gemma3:12b,
+#                                 deepseek-r1:8b, granite3.3:8b
+#
+# Security rule (from soul.md):
+#   ANY task involving API keys, credentials, secrets, .env files, or auth
+#   tokens gets a LOCAL model sub-agent. No exceptions.
 
 api:
   base_url_env: OLLAMA_BASE_URL
@@ -14,73 +21,126 @@ api:
   api_key_env: OLLAMA_API_KEY
 
 models:
-  glm-5.1:
+  # --- Cloud Models (Tier 1) ---
+  glm-5.1:cloud:
     tier: 1
-    context_window: 128000
+    context_window: 200000
     input_cost_per_m: 0.40
     output_cost_per_m: 1.10
-  kimi-k2.5:
+    local: false
+    swe_bench: 77.0
+  kimi-k2.5:cloud:
     tier: 1
     context_window: 128000
     input_cost_per_m: 0.42
     output_cost_per_m: 1.50
-  deepseek-v3.1:
-    tier: 2
+    local: false
+    swe_bench: 76.8
+  deepseek-v3.2:cloud:
+    tier: 1
     context_window: 128000
     input_cost_per_m: 0.10
     output_cost_per_m: 0.28
-  minimax-m2.7:
+    local: false
+    swe_bench: 67.0
+
+  # --- Cloud Models (Tier 2) ---
+  devstral-2:123b-cloud:
     tier: 2
-    context_window: 128000
+    context_window: 256000
+    input_cost_per_m: 0.15
+    output_cost_per_m: 0.60
+    local: false
+    swe_bench: 72.2
+  minimax-m2.7:cloud:
+    tier: 2
+    context_window: 200000
     input_cost_per_m: 0.30
     output_cost_per_m: 1.20
-  nemotron-3-super:
+    local: false
+    swe_bench: 78.0
+
+  # --- Cloud Models (Tier 3) ---
+  nemotron-3-super:cloud:
     tier: 3
-    context_window: 32000
+    context_window: 1000000
     input_cost_per_m: 0.25
     output_cost_per_m: 0.80
-  qwen3-coder:
+    local: false
+    swe_bench: 60.5
+  qwen3-coder:480b-cloud:
     tier: 3
-    context_window: 128000
+    context_window: 256000
     input_cost_per_m: 0.20
     output_cost_per_m: 0.80
-  nemotron-3-nano:
+    local: false
+    swe_bench: 65.0
+
+  # --- Cloud Models (Tier 4) ---
+  nemotron-3-nano:cloud:
     tier: 4
     context_window: 32000
     input_cost_per_m: 0.08
     output_cost_per_m: 0.20
-  ministral-3:
+    local: false
+    swe_bench: 40.0
+  ministral-3:cloud:
     tier: 4
     context_window: 32000
     input_cost_per_m: 0.05
     output_cost_per_m: 0.15
+    local: false
+    swe_bench: 35.0
 
-# Hat definitions — per HATS_TEAM_IMPLEMENTATION_GUIDE.md §E2.2
+  # --- Local Models (Tier L — never leave the machine) ---
+  phi4-mini:3.8b:
+    tier: 0
+    context_window: 128000
+    input_cost_per_m: 0.0
+    output_cost_per_m: 0.0
+    local: true
+    swe_bench: 30.0
+  gemma3:4b:
+    tier: 0
+    context_window: 128000
+    input_cost_per_m: 0.0
+    output_cost_per_m: 0.0
+    local: true
+    swe_bench: 28.0
+  gemma3:12b:
+    tier: 0
+    context_window: 128000
+    input_cost_per_m: 0.0
+    output_cost_per_m: 0.0
+    local: true
+    swe_bench: 45.0
+  deepseek-r1:8b:
+    tier: 0
+    context_window: 128000
+    input_cost_per_m: 0.0
+    output_cost_per_m: 0.0
+    local: true
+    swe_bench: 42.0
+  granite3.3:8b:
+    tier: 0
+    context_window: 128000
+    input_cost_per_m: 0.0
+    output_cost_per_m: 0.0
+    local: true
+    swe_bench: 38.0
+
+# Hat definitions — per soul.md model pool with security rule compliance
+# local_only: true means the hat ALWAYS uses a local model (never cloud)
+# local_model: model to use when sensitive content is detected (dual-mode hats)
 hats:
-  black:
-    name: "Black Hat — Security & Exploits"
-    emoji: "⚫"
-    number: 2
-    always_run: true
-    primary_model: "glm-5.1"
-    fallback_model: "deepseek-v3.1"
-    temperature: 0.2
-    max_tokens: 4096
-    timeout_seconds: 150
-    triggers: []  # Always runs
-    persona: |
-      You are BlackHat, an elite adversarial security analyst specializing
-      in penetration testing, threat modeling, and secure code review. You approach
-      every code change as a potential attack surface. Your mission is to find
-      exploitable vulnerabilities before attackers do.
-
   red:
     name: "Red Hat — Failure & Resilience"
     emoji: "🔴"
     number: 1
     always_run: false
-    primary_model: "glm-5.1"
-    fallback_model: "nemotron-3-super"
+    primary_model: "deepseek-v3.2:cloud"
+    fallback_model: "glm-5.1:cloud"
+    local_model: "deepseek-r1:8b"
     temperature: 0.3
     max_tokens: 4096
     timeout_seconds: 120
@@ -99,13 +159,34 @@ hats:
       in failure modes: what breaks when load spikes, when dependencies fail,
       when networks partition. You find cascade failures and single points of failure.
 
+  black:
+    name: "Black Hat — Security & Exploits"
+    emoji: "⚫"
+    number: 2
+    always_run: true
+    primary_model: "devstral-2:123b-cloud"
+    fallback_model: "kimi-k2.5:cloud"
+    local_model: "gemma3:12b"
+    local_only: false  # Dual-mode: switches to local for auth/credential code
+    temperature: 0.2
+    max_tokens: 4096
+    timeout_seconds: 150
+    triggers: []  # Always runs
+    persona: |
+      You are BlackHat, an elite adversarial security analyst specializing
+      in penetration testing, threat modeling, and secure code review. You approach
+      every code change as a potential attack surface. Your mission is to find
+      exploitable vulnerabilities before attackers do.
+
   white:
     name: "White Hat — Efficiency & Resources"
     emoji: "⚪"
     number: 3
     always_run: false
-    primary_model: "nemotron-3-super"
-    fallback_model: "ministral-3"
+    primary_model: "phi4-mini:3.8b"
+    fallback_model: "gemma3:4b"
+    local_model: "phi4-mini:3.8b"
+    local_only: true  # Always local — deterministic, cheap, security-compliant
     temperature: 0.1
     max_tokens: 2048
     timeout_seconds: 90
@@ -128,8 +209,8 @@ hats:
     emoji: "🟡"
     number: 4
     always_run: false
-    primary_model: "glm-5.1"
-    fallback_model: "nemotron-3-super"
+    primary_model: "glm-5.1:cloud"
+    fallback_model: "minimax-m2.7:cloud"
     temperature: 0.3
     max_tokens: 4096
     timeout_seconds: 120
@@ -150,8 +231,8 @@ hats:
     emoji: "🟢"
     number: 5
     always_run: false
-    primary_model: "glm-5.1"
-    fallback_model: "minimax-m2.7"
+    primary_model: "minimax-m2.7:cloud"
+    fallback_model: "glm-5.1:cloud"
     temperature: 0.3
     max_tokens: 4096
     timeout_seconds: 120
@@ -172,8 +253,10 @@ hats:
     emoji: "🔵"
     number: 6
     always_run: true
-    primary_model: "nemotron-3-super"
-    fallback_model: "ministral-3"
+    primary_model: "phi4-mini:3.8b"
+    fallback_model: "gemma3:4b"
+    local_model: "phi4-mini:3.8b"
+    local_only: true  # Always local — rule-based, cheap, security-compliant
     temperature: 0.1
     max_tokens: 2048
     timeout_seconds: 60
@@ -188,8 +271,8 @@ hats:
     emoji: "🟣"
     number: 7
     always_run: false
-    primary_model: "deepseek-v3.1"
-    fallback_model: "nemotron-3-super"
+    primary_model: "devstral-2:123b-cloud"
+    fallback_model: "deepseek-v3.2:cloud"
     temperature: 0.3
     max_tokens: 4096
     timeout_seconds: 120
@@ -209,8 +292,8 @@ hats:
     emoji: "🩵"
     number: 8
     always_run: false
-    primary_model: "glm-5.1"
-    fallback_model: "minimax-m2.7"
+    primary_model: "kimi-k2.5:cloud"
+    fallback_model: "minimax-m2.7:cloud"
     temperature: 0.4
     max_tokens: 4096
     timeout_seconds: 150
@@ -232,8 +315,10 @@ hats:
     emoji: "🟪"
     number: 9
     always_run: true
-    primary_model: "glm-5.1"
-    fallback_model: "deepseek-v3.1"
+    primary_model: "glm-5.1:cloud"
+    fallback_model: "deepseek-v3.2:cloud"
+    local_model: "deepseek-r1:8b"
+    local_only: false  # Dual-mode: switches to local for PII/user data
     temperature: 0.2
     max_tokens: 4096
     timeout_seconds: 150
@@ -248,8 +333,8 @@ hats:
     emoji: "🟠"
     number: 10
     always_run: false
-    primary_model: "glm-5.1"
-    fallback_model: "nemotron-3-super"
+    primary_model: "glm-5.1:cloud"
+    fallback_model: "deepseek-v3.2:cloud"
     temperature: 0.2
     max_tokens: 4096
     timeout_seconds: 90
@@ -272,8 +357,10 @@ hats:
     emoji: "🪨"
     number: 11
     always_run: false
-    primary_model: "nemotron-3-nano"
-    fallback_model: "ministral-3"
+    primary_model: "gemma3:4b"
+    fallback_model: "phi4-mini:3.8b"
+    local_model: "gemma3:4b"
+    local_only: true  # Always local — deterministic token counting
     temperature: 0.1
     max_tokens: 2048
     timeout_seconds: 60
@@ -294,8 +381,8 @@ hats:
     emoji: "💎"
     number: 12
     always_run: false
-    primary_model: "glm-5.1"
-    fallback_model: "qwen3-coder"
+    primary_model: "qwen3-coder:480b-cloud"
+    fallback_model: "devstral-2:123b-cloud"
     temperature: 0.2
     max_tokens: 4096
     timeout_seconds: 120
@@ -316,8 +403,10 @@ hats:
     emoji: "🟤"
     number: 13
     always_run: false
-    primary_model: "glm-5.1"
-    fallback_model: "deepseek-v3.1"
+    primary_model: "deepseek-v3.2:cloud"
+    fallback_model: "glm-5.1:cloud"
+    local_model: "deepseek-r1:8b"
+    local_only: false  # Dual-mode: switches to local for PII analysis
     temperature: 0.2
     max_tokens: 4096
     timeout_seconds: 120
@@ -340,8 +429,8 @@ hats:
     emoji: "⚙️"
     number: 14
     always_run: false
-    primary_model: "glm-5.1"
-    fallback_model: "nemotron-3-super"
+    primary_model: "nemotron-3-super:cloud"
+    fallback_model: "glm-5.1:cloud"
     temperature: 0.3
     max_tokens: 4096
     timeout_seconds: 90
@@ -364,8 +453,10 @@ hats:
     emoji: "♿"
     number: 15
     always_run: false
-    primary_model: "nemotron-3-super"
-    fallback_model: "ministral-3"
+    primary_model: "phi4-mini:3.8b"
+    fallback_model: "gemma3:4b"
+    local_model: "phi4-mini:3.8b"
+    local_only: true  # Always local — pattern-based, cheap
     temperature: 0.1
     max_tokens: 2048
     timeout_seconds: 60
@@ -388,8 +479,8 @@ hats:
     emoji: "🔗"
     number: 16
     always_run: false
-    primary_model: "deepseek-v3.1"
-    fallback_model: "nemotron-3-nano"
+    primary_model: "devstral-2:123b-cloud"
+    fallback_model: "deepseek-v3.2:cloud"
     temperature: 0.1
     max_tokens: 2048
     timeout_seconds: 60
@@ -412,8 +503,8 @@ hats:
     emoji: "🧪"
     number: 17
     always_run: false
-    primary_model: "glm-5.1"
-    fallback_model: "qwen3-coder"
+    primary_model: "qwen3-coder:480b-cloud"
+    fallback_model: "devstral-2:123b-cloud"
     temperature: 0.3
     max_tokens: 4096
     timeout_seconds: 120
@@ -436,8 +527,8 @@ hats:
     number: 18
     always_run: true
     run_last: true
-    primary_model: "glm-5.1"
-    fallback_model: null  # CoVE must always use best available model
+    primary_model: "glm-5.1:cloud"
+    fallback_model: "kimi-k2.5:cloud"  # Fixed: was null, now has Tier 1 fallback
     temperature: 0.2
     max_tokens: 8192
     timeout_seconds: 300
@@ -456,6 +547,9 @@ gates:
   security_fast_path:
     enabled: true
     trigger_severity: "CRITICAL"
+  consistency:
+    enabled: true
+    conflict_resolution: "cove"  # Gold Hat resolves conflicts
   timeout:
     default_per_hat_seconds: 120
 
@@ -463,11 +557,19 @@ gates:
 execution:
   strategy: "tiered_parallel"
   max_concurrent_hats: 6
+  max_cloud_parallel: 4  # Max cloud model calls in parallel
+  max_local_parallel: 1  # Local models run one at a time
+  trio_mode_cloud: 3     # Fallback: 3 cloud + 1 local when budget is tight
   retry:
     max_attempts: 3
     initial_backoff_seconds: 1
     backoff_multiplier: 2
     max_backoff_seconds: 10
+  circuit_breaker:
+    hat_failure_threshold: 5
+    hat_reset_timeout_seconds: 60
+    provider_failure_threshold: 10
+    provider_reset_timeout_seconds: 120
 
 # Risk score formula per CATALOG.md
 risk_score:

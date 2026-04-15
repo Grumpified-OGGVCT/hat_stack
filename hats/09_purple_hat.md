@@ -193,6 +193,18 @@ Threats to be illustrated:
 | **RAGAS faithfulness metrics** | Detecting hallucination (output contradicts retrieved context) |
 | **EU AI Act classification framework** | Risk classification and compliance requirements |
 
+## Ollama Cloud Model Assignment
+
+| Role | Model | Context Window | SWE-bench |
+|------|-------|---------------|-----------|
+| Primary | glm-5.1:cloud | 200K | ~77% |
+| Fallback | deepseek-v3.2:cloud | 128K | ~67% |
+| Local (sensitive mode) | deepseek-r1:8b | 128K | ~42% |
+
+**Security Mode:** When sensitive content (credentials, PII, auth tokens) is detected in the diff, this hat automatically switches to its local model. No exceptions.
+
+---
+
 ## References
 
 - [OWASP Agentic AI Top 10](https://owasp.org/www-project-top-10-for-agentic-ai/)

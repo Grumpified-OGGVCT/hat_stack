@@ -171,6 +171,18 @@ Scenarios to be illustrated:
 | **Technology Radar methodology** (ThoughtWorks) | Structured technology adoption assessment |
 | **Competitive analysis frameworks** | Evaluating alternatives to the proposed technology |
 
+## Ollama Cloud Model Assignment
+
+| Role | Model | Context Window | SWE-bench |
+|------|-------|---------------|-----------|
+| Primary | kimi-k2.5:cloud | 128K | 76.8% |
+| Fallback | minimax-m2.7:cloud | 200K | ~78% |
+| Local (sensitive mode) | N/A -- always cloud | N/A | N/A |
+
+**Security Mode:** Cloud-only. No sensitive content processing -- see Black/Purple/Brown hats for credential analysis.
+
+---
+
 ## References
 
 - [ThoughtWorks Technology Radar](https://www.thoughtworks.com/radar)

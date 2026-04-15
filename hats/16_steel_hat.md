@@ -174,6 +174,18 @@ Scenarios to be illustrated:
 | **`licensee`** | Automated license detection |
 | **`dep-tree`** | Transitive dependency analysis visualization |
 
+## Ollama Cloud Model Assignment
+
+| Role | Model | Context Window | SWE-bench |
+|------|-------|---------------|-----------|
+| Primary | devstral-2:123b-cloud | 256K | 72.2% |
+| Fallback | deepseek-v3.2:cloud | 128K | ~67% |
+| Local (sensitive mode) | N/A -- always cloud | N/A | N/A |
+
+**Security Mode:** Cloud-only. No sensitive content processing -- see Black/Purple/Brown hats for credential analysis.
+
+---
+
 ## References
 
 - [Syft — SBOM Generation Tool](https://github.com/anchore/syft)

@@ -173,6 +173,18 @@ Scenarios to be illustrated:
 | **Screen-reader simulation** (VoiceOver, NVDA, JAWS) | Manual screen-reader compatibility testing |
 | **Colour Contrast Analyser** (TPGi) | Precise color contrast ratio calculation |
 
+## Ollama Cloud Model Assignment
+
+| Role | Model | Context Window | SWE-bench |
+|------|-------|---------------|-----------|
+| Primary | phi4-mini:3.8b | 128K | ~30% |
+| Fallback | gemma3:4b | 128K | ~28% |
+| Local (sensitive mode) | phi4-mini:3.8b | 128K | ~30% |
+
+**Security Mode:** Always runs locally. Never sends data to cloud APIs. No exceptions.
+
+---
+
 ## References
 
 - [WCAG 2.2 Specification (W3C)](https://www.w3.org/TR/WCAG22/)

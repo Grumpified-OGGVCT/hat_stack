@@ -1,221 +1,68 @@
 #!/usr/bin/env python3
 """
-🎩 Hats Team Runner — GitHub Actions Orchestrator
+Hats Team Runner -- GitHub Actions Orchestrator
 
 Implements the Conductor logic from the Hats Team Specification:
-  - Hat selection based on diff triggers
-  - Tiered-parallel execution via Ollama Cloud API
-  - Gate engine (cost budget, security fast-path, timeout)
-  - Consolidation and Gold Hat (CoVE) final adjudication
+  - Hat selection based on diff triggers (via hat_selector.py)
+  - Tiered-parallel execution via Ollama Cloud API (cloud pool + local queue)
+  - Gate engine: cost budget (G1), security fast-path (G2), consistency (G3),
+    timeout (G4), final decision (G5) (via gates.py)
+  - Consolidation and deduplication (via consolidator.py)
+  - Gold Hat (CoVE) final adjudication
+  - Checkpoint persistence (via state.py)
   - Structured JSON + Markdown report output
 
 Usage:
   python hats_runner.py --diff <diff_text_or_file> [--hats black,blue,...] [--config hat_configs.yml]
 
 Environment:
-  OLLAMA_API_KEY   — Ollama Cloud API key (required)
-  OLLAMA_BASE_URL  — API base URL (default: https://api.ollama.ai/v1)
+  OLLAMA_API_KEY   -- Ollama Cloud API key (required)
+  OLLAMA_BASE_URL  -- API base URL (default: https://api.ollama.ai/v1)
 """
 
 import argparse
 import json
 import os
-import re
 import sys
 import time
 import traceback
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
 from pathlib import Path
 
-import requests
-import yaml
-
-SCRIPT_DIR = Path(__file__).resolve().parent
-DEFAULT_CONFIG = SCRIPT_DIR / "hat_configs.yml"
-
-# ---------------------------------------------------------------------------
-# Preflight health check — clear errors for missing configuration
-# ---------------------------------------------------------------------------
-
-def preflight_check() -> list[str]:
-    """Check that required environment is configured.
-
-    Returns a list of warning/error messages. Empty list = all good.
-    """
-    issues = []
-
-    api_key = os.environ.get("OLLAMA_API_KEY", "").strip()
-    if not api_key:
-        issues.append(
-            "❌ OLLAMA_API_KEY is not set.\n"
-            "   → For GitHub Actions: Add it as a Repository Secret\n"
-            "     (Settings → Secrets and variables → Actions → New repository secret)\n"
-            "   → For local use: Copy .env.example to .env and fill in your key\n"
-            "   → Get a key at: https://ollama.ai/cloud"
-        )
-
-    base_url = os.environ.get("OLLAMA_BASE_URL", "").strip()
-    if not base_url:
-        # Not an error — we have a default
-        issues.append(
-            "ℹ️  OLLAMA_BASE_URL not set — using default: https://api.ollama.ai/v1"
-        )
-
-    return issues
+# Shared modules
+from hats_common import (
+    load_config,
+    call_ollama,
+    detect_sensitive_mode,
+    build_comparable_model_sequence,
+    estimate_cost,
+    truncate_to_context_window,
+    preflight_check,
+    ConcurrencyCoordinator,
+    RetryPolicy,
+    DEFAULT_CONFIG,
+)
+from gates import (
+    gate_cost_budget,
+    gate_security_fast_path,
+    gate_consistency,
+    gate_timeout,
+    gate_final_decision,
+)
+from consolidator import consolidate_findings, normalize_severity
+from hat_selector import select_hats, _extract_changed_files
+from state import (
+    create_initial_state,
+    save_checkpoint,
+    load_checkpoint,
+    update_state,
+    finalize_state,
+    get_pending_hats,
+)
 
 
 # ---------------------------------------------------------------------------
-# Config loader
-# ---------------------------------------------------------------------------
-
-def load_config(config_path: str | Path) -> dict:
-    """Load hat configuration from YAML file."""
-    with open(config_path, "r", encoding="utf-8") as fh:
-        return yaml.safe_load(fh)
-
-
-# ---------------------------------------------------------------------------
-# Hat selector — determines which hats to run based on diff content
-# ---------------------------------------------------------------------------
-
-def select_hats(config: dict, diff_text: str, requested_hats: list[str] | None = None) -> list[str]:
-    """Select hats to run based on diff content triggers (per SPEC.md §6).
-
-    Always-run hats (Black, Blue, Purple, Gold) are always included.
-    Conditional hats activate when their trigger keywords appear in the diff.
-    If requested_hats is provided, only those hats (plus always-run) are used.
-    """
-    hats_cfg = config["hats"]
-    selected = []
-    diff_lower = diff_text.lower()
-
-    for hat_id, hat_def in hats_cfg.items():
-        # Always-run hats are mandatory
-        if hat_def.get("always_run"):
-            selected.append(hat_id)
-            continue
-
-        # If caller requested specific hats, only include those
-        if requested_hats and hat_id not in requested_hats:
-            continue
-
-        # Check trigger keywords against diff content
-        triggers = hat_def.get("triggers", [])
-        if any(trigger.lower() in diff_lower for trigger in triggers):
-            selected.append(hat_id)
-
-    # Gold/CoVE must always run last — ensure it's at the end
-    if "gold" in selected:
-        selected.remove("gold")
-        selected.append("gold")
-
-    return selected
-
-
-# ---------------------------------------------------------------------------
-# Cost estimation gate (G1)
-# ---------------------------------------------------------------------------
-
-def estimate_cost(config: dict, selected_hats: list[str], diff_tokens: int) -> tuple[float, bool]:
-    """Estimate pipeline cost and check against budget gate.
-
-    Returns (estimated_cost_usd, within_budget).
-    """
-    models_cfg = config["models"]
-    hats_cfg = config["hats"]
-    budget = config["gates"]["cost_budget"]["max_usd_per_pr"]
-
-    total_cost = 0.0
-    for hat_id in selected_hats:
-        hat_def = hats_cfg[hat_id]
-        model_name = hat_def["primary_model"]
-        model_cfg = models_cfg.get(model_name, {})
-
-        # Estimate: input = diff_tokens + ~500 (system prompt), output = max_tokens
-        input_tokens = min(diff_tokens + 500, model_cfg.get("context_window", 128000))
-        output_tokens = hat_def.get("max_tokens", 4096)
-
-        input_cost = (input_tokens / 1_000_000) * model_cfg.get("input_cost_per_m", 0.20)
-        output_cost = (output_tokens / 1_000_000) * model_cfg.get("output_cost_per_m", 0.80)
-        total_cost += input_cost + output_cost
-
-    return total_cost, total_cost <= budget
-
-
-# ---------------------------------------------------------------------------
-# Ollama Cloud API caller
-# ---------------------------------------------------------------------------
-
-def call_ollama(config: dict, model: str, system_prompt: str, user_prompt: str,
-                temperature: float = 0.3, max_tokens: int = 4096,
-                timeout: int = 120) -> dict:
-    """Call the Ollama Cloud OpenAI-compatible chat completions endpoint."""
-    api_cfg = config["api"]
-    base_url = os.environ.get(
-        api_cfg.get("base_url_env", "OLLAMA_BASE_URL"),
-        api_cfg.get("default_base_url", "https://api.ollama.ai/v1"),
-    )
-    api_key = os.environ.get(
-        api_cfg.get("api_key_env", "OLLAMA_API_KEY"), ""
-    )
-
-    if not api_key:
-        return {
-            "error": "OLLAMA_API_KEY not set",
-            "model": model,
-            "content": None,
-            "usage": {"input": 0, "output": 0},
-        }
-
-    url = f"{base_url.rstrip('/')}/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-        "response_format": {"type": "json_object"},
-    }
-
-    try:
-        resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
-        resp.raise_for_status()
-        data = resp.json()
-        choice = data.get("choices", [{}])[0]
-        usage = data.get("usage", {})
-        return {
-            "error": None,
-            "model": model,
-            "content": choice.get("message", {}).get("content", ""),
-            "usage": {
-                "input": usage.get("prompt_tokens", 0),
-                "output": usage.get("completion_tokens", 0),
-            },
-        }
-    except requests.exceptions.Timeout:
-        return {
-            "error": f"Timeout after {timeout}s",
-            "model": model,
-            "content": None,
-            "usage": {"input": 0, "output": 0},
-        }
-    except requests.exceptions.RequestException as exc:
-        return {
-            "error": str(exc),
-            "model": model,
-            "content": None,
-            "usage": {"input": 0, "output": 0},
-        }
-
-
-# ---------------------------------------------------------------------------
-# Single hat execution
+# Finding schema — forced JSON output structure
 # ---------------------------------------------------------------------------
 
 _FINDING_SCHEMA = """\
@@ -229,6 +76,8 @@ Respond with a JSON object with this exact schema:
       "description": "<detailed description>",
       "file": "<file path if applicable>",
       "line": <line number if applicable or null>,
+      "line_range": "<line range if applicable or null>",
+      "category": "<finding category>",
       "recommendation": "<actionable fix>"
     }
   ],
@@ -238,38 +87,65 @@ Respond with a JSON object with this exact schema:
 """
 
 
-def run_hat(config: dict, hat_id: str, diff_text: str, context: str = "") -> dict:
+# ---------------------------------------------------------------------------
+# Single hat execution — with model selection for sensitive mode
+# ---------------------------------------------------------------------------
+
+def run_hat(config: dict, hat_id: str, diff_text: str, context: str = "",
+            sensitive_mode: bool = False, coordinator: ConcurrencyCoordinator | None = None) -> dict:
     """Execute a single hat analysis against the diff.
 
-    Returns the hat's structured report or an error report.
+    Respects sensitive mode by switching dual-mode hats to local models.
+    Uses the concurrency coordinator to enforce cloud/local parallelism limits.
     """
     hats_cfg = config["hats"]
     hat_def = hats_cfg[hat_id]
 
-    system_prompt = hat_def["persona"].strip() + "\n\n" + _FINDING_SCHEMA
+    # Determine which model to use
+    if coordinator:
+        model = coordinator.get_model_for_hat(config, hat_id, sensitive_mode)
+        hat_type = coordinator.classify_hat(config, hat_id, sensitive_mode)
+    else:
+        model = hat_def["primary_model"]
+        if sensitive_mode and hat_id in ("black", "purple", "brown"):
+            model = hat_def.get("local_model", hat_def["primary_model"])
+        hat_type = "local" if hat_def.get("local_only") else "cloud"
 
+    system_prompt = hat_def["persona"].strip() + "\n\n" + _FINDING_SCHEMA
     user_prompt = f"## Code Diff to Analyze\n\n```diff\n{diff_text}\n```"
     if context:
         user_prompt = f"## Additional Context\n\n{context}\n\n{user_prompt}"
 
-    model = hat_def["primary_model"]
     temperature = hat_def.get("temperature", 0.3)
     max_tokens = hat_def.get("max_tokens", 4096)
     timeout = hat_def.get("timeout_seconds", 120)
+    fallback = hat_def.get("fallback_model")
+
+    # For local-only hats, use local fallback chain
+    if hat_type == "local":
+        fallback = hat_def.get("fallback_model") if hat_def.get("local_only") else hat_def.get("local_model")
 
     start = time.time()
-    result = call_ollama(config, model, system_prompt, user_prompt,
-                         temperature=temperature, max_tokens=max_tokens,
-                         timeout=timeout)
+    result = None
+
+    if coordinator and hat_type == "local":
+        # Acquire local model slot (only 1 local model at a time)
+        with coordinator.local_queue:
+            result = _try_model_chain(config, model, fallback, system_prompt, user_prompt,
+                                      temperature, max_tokens, timeout, hat_id)
+    elif coordinator and hat_type == "cloud":
+        # Cloud models run in the cloud pool (up to 4 parallel)
+        result = _try_model_chain(config, model, fallback, system_prompt, user_prompt,
+                                  temperature, max_tokens, timeout, hat_id)
+    else:
+        # No coordinator (legacy / simple mode)
+        result = _try_model_chain(config, model, fallback, system_prompt, user_prompt,
+                                  temperature, max_tokens, timeout, hat_id)
+
     elapsed = time.time() - start
 
-    # If primary fails, try fallback
-    if result["error"] and hat_def.get("fallback_model"):
-        fallback = hat_def["fallback_model"]
-        result = call_ollama(config, fallback, system_prompt, user_prompt,
-                             temperature=temperature, max_tokens=max_tokens,
-                             timeout=timeout)
-        elapsed = time.time() - start
+    # Check timeout gate (G4)
+    timeout_gate = gate_timeout(config, hat_id, elapsed)
 
     report = {
         "hat_id": hat_id,
@@ -282,6 +158,7 @@ def run_hat(config: dict, hat_id: str, diff_text: str, context: str = "") -> dic
         "findings": [],
         "summary": "",
         "confidence": 0.0,
+        "timed_out": timeout_gate["timed_out"],
     }
 
     if result["content"]:
@@ -291,7 +168,6 @@ def run_hat(config: dict, hat_id: str, diff_text: str, context: str = "") -> dic
             report["summary"] = parsed.get("summary", "")
             report["confidence"] = parsed.get("confidence", 0.0)
         except json.JSONDecodeError:
-            # Model didn't return valid JSON — wrap the raw text as a single finding
             report["findings"] = [{
                 "severity": "LOW",
                 "title": "Unstructured response",
@@ -302,55 +178,47 @@ def run_hat(config: dict, hat_id: str, diff_text: str, context: str = "") -> dic
             }]
             report["summary"] = "Model returned unstructured response"
 
+    if timeout_gate["timed_out"]:
+        report["error"] = report.get("error") or f"Timeout after {timeout_gate['timeout_limit']}s"
+
     return report
 
 
-# ---------------------------------------------------------------------------
-# Consolidator — merge all hat reports
-# ---------------------------------------------------------------------------
+def _try_model_chain(config: dict, primary: str, fallback: str | None,
+                     system_prompt: str, user_prompt: str,
+                     temperature: float, max_tokens: int, timeout: int,
+                     hat_id: str) -> dict:
+    """Try primary model, then fallback chain if primary fails."""
+    result = call_ollama(config, primary, system_prompt, user_prompt,
+                         temperature=temperature, max_tokens=max_tokens,
+                         timeout=timeout, hat_id=hat_id)
 
-def consolidate_reports(reports: list[dict]) -> dict:
-    """Merge all hat reports into a single consolidated report.
+    if not result["error"]:
+        return result
 
-    Aggregates findings from all hats and tallies severities.
-    """
-    all_findings = []
-    severity_counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
-    hat_summaries = []
-    total_tokens = {"input": 0, "output": 0}
-    total_cost = 0.0
+    # Try fallback model
+    if fallback:
+        print(f"  Primary model {primary} failed for {hat_id}, trying fallback {fallback}",
+              file=sys.stderr)
+        result = call_ollama(config, fallback, system_prompt, user_prompt,
+                             temperature=temperature, max_tokens=max_tokens,
+                             timeout=timeout, hat_id=hat_id)
+        if not result["error"]:
+            return result
 
-    for report in reports:
-        hat_summaries.append({
-            "hat": report["hat_name"],
-            "emoji": report["emoji"],
-            "model": report["model_used"],
-            "latency_s": report["latency_seconds"],
-            "findings_count": len(report["findings"]),
-            "error": report.get("error"),
-        })
+    # Try full model fallback chain
+    chain = build_comparable_model_sequence(config, primary, fallback)
+    for model in chain:
+        if model == primary or model == fallback:
+            continue  # Already tried
+        print(f"  Fallback chain: trying {model} for {hat_id}", file=sys.stderr)
+        result = call_ollama(config, model, system_prompt, user_prompt,
+                             temperature=temperature, max_tokens=max_tokens,
+                             timeout=timeout, hat_id=hat_id)
+        if not result["error"]:
+            return result
 
-        total_tokens["input"] += report["token_usage"]["input"]
-        total_tokens["output"] += report["token_usage"]["output"]
-
-        for finding in report["findings"]:
-            severity = finding.get("severity", "LOW").upper()
-            if severity in severity_counts:
-                severity_counts[severity] += 1
-
-            finding_with_source = dict(finding)
-            finding_with_source["source_hat"] = report["hat_name"]
-            finding_with_source["source_emoji"] = report["emoji"]
-            all_findings.append(finding_with_source)
-
-    return {
-        "hat_summaries": hat_summaries,
-        "all_findings": all_findings,
-        "severity_counts": severity_counts,
-        "total_tokens": total_tokens,
-        "hats_executed": len(reports),
-        "hats_failed": sum(1 for r in reports if r.get("error")),
-    }
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -364,7 +232,7 @@ def compute_risk_score(config: dict, severity_counts: dict) -> tuple[int, str]:
     """
     rs = config.get("risk_score", {})
 
-    # Any CRITICAL → automatic QUARANTINE
+    # Any CRITICAL -> automatic QUARANTINE
     if severity_counts.get("CRITICAL", 0) > 0:
         score = min(100,
             min(severity_counts["CRITICAL"] * rs.get("critical_weight", 20), rs.get("critical_cap", 80)) +
@@ -396,45 +264,76 @@ def compute_risk_score(config: dict, severity_counts: dict) -> tuple[int, str]:
 # ---------------------------------------------------------------------------
 
 def generate_markdown_report(consolidated: dict, risk_score: int, verdict: str,
-                             selected_hats: list[str], config: dict) -> str:
+                             selected_hats: list[str], config: dict,
+                             sensitive_mode: bool = False) -> str:
     """Generate a Markdown summary report suitable for PR comments."""
     lines = []
-    lines.append("# 🎩 Hats Team Review Report\n")
+    lines.append("# Hats Team Review Report\n")
 
     # Verdict banner
-    emoji_map = {"ALLOW": "✅", "ESCALATE": "⚠️", "QUARANTINE": "🚫"}
-    lines.append(f"## {emoji_map.get(verdict, '❓')} Verdict: **{verdict}** (Risk Score: {risk_score}/100)\n")
+    emoji_map = {"ALLOW": "PASS", "ESCALATE": "WARN", "QUARANTINE": "BLOCK"}
+    verdict_label = emoji_map.get(verdict, "UNKNOWN")
+    lines.append(f"## Verdict: **{verdict}** (Risk Score: {risk_score}/100)\n")
+
+    # Sensitive mode indicator
+    if sensitive_mode:
+        lines.append("> **Sensitive mode active** — credential/PII content detected. "
+                     "Dual-mode hats used local models.\n")
 
     # Severity summary
     sc = consolidated["severity_counts"]
     lines.append("### Severity Summary\n")
-    lines.append(f"| Severity | Count |")
-    lines.append(f"|----------|-------|")
-    lines.append(f"| 🔴 CRITICAL | {sc['CRITICAL']} |")
-    lines.append(f"| 🟠 HIGH | {sc['HIGH']} |")
-    lines.append(f"| 🟡 MEDIUM | {sc['MEDIUM']} |")
-    lines.append(f"| 🟢 LOW | {sc['LOW']} |")
+    lines.append("| Severity | Count |")
+    lines.append("|----------|-------|")
+    lines.append(f"| CRITICAL | {sc.get('CRITICAL', 0)} |")
+    lines.append(f"| HIGH | {sc.get('HIGH', 0)} |")
+    lines.append(f"| MEDIUM | {sc.get('MEDIUM', 0)} |")
+    lines.append(f"| LOW | {sc.get('LOW', 0)} |")
+    if sc.get("INFO", 0) > 0:
+        lines.append(f"| INFO | {sc['INFO']} |")
     lines.append("")
+
+    # Dedup stats
+    dedup = consolidated.get("dedup_stats", {})
+    if dedup.get("removed_duplicates", 0) > 0:
+        lines.append(f"> Deduplicated: {dedup['original_count']} findings -> "
+                     f"{dedup['deduplicated_count']} (removed {dedup['removed_duplicates']} duplicates)\n")
 
     # Hat execution summary
     lines.append("### Hat Execution Summary\n")
     lines.append("| Hat | Model | Latency | Findings | Status |")
     lines.append("|-----|-------|---------|----------|--------|")
     for hs in consolidated["hat_summaries"]:
-        status = "❌ Error" if hs["error"] else "✅ OK"
+        status = "Error" if hs.get("error") else "OK"
         lines.append(
             f"| {hs['emoji']} {hs['hat']} | `{hs['model']}` | "
             f"{hs['latency_s']:.1f}s | {hs['findings_count']} | {status} |"
         )
     lines.append("")
 
+    # Conflicts
+    conflicts = consolidated.get("conflicts", [])
+    if conflicts:
+        lines.append("### Conflicts (flagged for CoVE resolution)\n")
+        for conflict in conflicts:
+            a = conflict.get("finding_a", {})
+            b = conflict.get("finding_b", {})
+            lines.append(f"- **{a.get('source_hat', '?')}** says: {a.get('title', '?')} "
+                         f"vs **{b.get('source_hat', '?')}** says: {b.get('title', '?')}")
+        lines.append("")
+
+    # Not-evaluated hats
+    not_eval = consolidated.get("not_evaluated_hats", [])
+    if not_eval:
+        lines.append(f"### Not Evaluated (timed out): {', '.join(not_eval)}\n")
+
     # Findings details
     if consolidated["all_findings"]:
         lines.append("### Findings\n")
         for i, finding in enumerate(consolidated["all_findings"], 1):
             sev = finding.get("severity", "LOW")
-            sev_emoji = {"CRITICAL": "🔴", "HIGH": "🟠", "MEDIUM": "🟡", "LOW": "🟢"}.get(sev, "⚪")
-            lines.append(f"#### {i}. {sev_emoji} [{sev}] {finding.get('title', 'Untitled')}")
+            conflict_marker = " [CONFLICT]" if finding.get("conflicted") else ""
+            lines.append(f"#### {i}. [{sev}]{conflict_marker} {finding.get('title', 'Untitled')}")
             lines.append(f"**Source:** {finding.get('source_emoji', '')} {finding.get('source_hat', 'Unknown')}")
             if finding.get("file"):
                 loc = f"`{finding['file']}`"
@@ -450,86 +349,180 @@ def generate_markdown_report(consolidated: dict, risk_score: int, verdict: str,
     lines.append(f"- **Hats Selected:** {len(selected_hats)}")
     lines.append(f"- **Hats Executed:** {consolidated['hats_executed']}")
     lines.append(f"- **Hats Failed:** {consolidated['hats_failed']}")
-    lines.append(f"- **Total Tokens:** {consolidated['total_tokens']['input'] + consolidated['total_tokens']['output']:,}")
+    total_tok = consolidated["total_tokens"]
+    lines.append(f"- **Total Tokens:** {total_tok['input'] + total_tok['output']:,}")
     lines.append("")
 
     return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
-# Main orchestrator
+# Main orchestrator — the Conductor
 # ---------------------------------------------------------------------------
 
 def run_pipeline(diff_text: str, config: dict, requested_hats: list[str] | None = None,
-                 context: str = "", output_format: str = "both") -> dict:
-    """Run the full Hats pipeline: select → estimate → execute → consolidate → adjudicate.
+                 context: str = "", output_format: str = "both",
+                 run_id: str | None = None) -> dict:
+    """Run the full Hats pipeline:
 
-    Returns a dict with keys: verdict, risk_score, markdown, json_report, consolidated.
+    select -> G1 (cost budget) -> sensitive mode detect -> dispatch -> G2/G4 ->
+    consolidate + G3 -> CoVE -> G5 -> output
+
+    Implements the full Conductor flow with cloud/local concurrency orchestration.
     """
-    # Step 1: Select hats
-    selected = select_hats(config, diff_text, requested_hats)
-    print(f"🎩 Selected {len(selected)} hats: {', '.join(selected)}", file=sys.stderr)
+    # Extract changed files from diff for dependency analysis
+    changed_files = _extract_changed_files(diff_text)
 
-    # Step 2: Cost estimation gate (G1)
-    # Rough token estimate: ~4 chars per token
+    # Step 1: Select hats (4-layer algorithm via hat_selector.py)
+    selected = select_hats(config, diff_text, requested_hats, changed_files)
+    print(f"Selected {len(selected)} hats: {', '.join(selected)}", file=sys.stderr)
+
+    # Step 2: Detect sensitive mode
+    sensitive_mode = detect_sensitive_mode(diff_text, changed_files)
+    if sensitive_mode:
+        print("SENSITIVE MODE: credential/PII content detected. "
+              "Dual-mode hats will use local models.", file=sys.stderr)
+
+    # Step 3: Cost Budget Gate (G1) — block or trim, not silently continue
     diff_tokens = len(diff_text) // 4
-    est_cost, within_budget = estimate_cost(config, selected, diff_tokens)
-    print(f"💰 Estimated cost: ${est_cost:.4f} (budget: ${config['gates']['cost_budget']['max_usd_per_pr']}) "
-          f"{'✅ PASS' if within_budget else '⚠️ OVER BUDGET'}", file=sys.stderr)
+    budget_result = gate_cost_budget(config, selected, diff_tokens)
+    print(f"Cost estimate: ${budget_result['estimated_cost']:.4f} "
+          f"(budget: ${budget_result['budget_limit']}) "
+          f"{'PASS' if budget_result['verdict'] == 'PASS' else budget_result['verdict']}",
+          file=sys.stderr)
 
-    if not within_budget:
-        # Drop lowest-priority (Tier 4) conditional hats to fit budget
-        always_hats = {h for h, d in config["hats"].items() if d.get("always_run")}
-        selected = [h for h in selected if h in always_hats or
-                    config["hats"][h].get("primary_model") != "nemotron-3-nano"]
-        print(f"🎩 Trimmed to {len(selected)} hats after budget gate", file=sys.stderr)
+    if budget_result["verdict"] == "BLOCKED":
+        # Budget gate blocks — return error instead of silently trimming
+        print("BUDGET GATE BLOCKED: Even after trimming all conditional hats, "
+              "the pipeline exceeds budget.", file=sys.stderr)
+        return {
+            "verdict": "BLOCKED",
+            "risk_score": 100,
+            "error": "Budget gate blocked — pipeline cost exceeds budget even with only mandatory hats",
+            "budget_result": budget_result,
+            "markdown": "# Budget Gate Blocked\n\nThe pipeline cost exceeds the configured budget "
+                        "even after trimming all conditional hats. Review the diff size or increase the budget.",
+            "json_report": {
+                "verdict": "BLOCKED",
+                "risk_score": 100,
+                "error": "Budget gate blocked",
+                "budget_result": budget_result,
+            },
+            "consolidated": {},
+        }
 
-    # Step 3: Execute hats (tiered parallel — per SPEC.md §6)
-    # Separate Gold/CoVE (must run last) from the rest
+    if budget_result["verdict"] == "TRIMMED":
+        selected = budget_result["selected_hats"]
+        print(f"Budget gate trimmed to {len(selected)} hats. "
+              f"Removed: {', '.join(budget_result['trimmed_hats'])}", file=sys.stderr)
+
+    # Initialize run state
+    if not run_id:
+        run_id = time.strftime("run-%Y%m%d-%H%M%S", time.gmtime())
+    state = create_initial_state(
+        run_id=run_id,
+        trigger_type="manual",
+        diff_content=diff_text[:500],  # Don't store the full diff in state
+        changed_files=changed_files,
+        triggered_hats=selected,
+        sensitive_mode=sensitive_mode,
+    )
+    update_state(state, gate={"gate_id": "G1", "passed": True, "details": budget_result})
+
+    # Step 4: Set up concurrency coordinator
+    exec_cfg = config.get("execution", {})
+    max_cloud = exec_cfg.get("max_cloud_parallel", 4)
+    if budget_result["verdict"] == "TRIMMED":
+        max_cloud = exec_cfg.get("trio_mode_cloud", 3)  # Tight budget -> trio mode
+
+    coordinator = ConcurrencyCoordinator(max_cloud=max_cloud)
+    coordinator.start()
+
+    # Step 5: Separate hats into cloud and local pools
     pre_gold = [h for h in selected if h != "gold"]
-    max_workers = config["execution"]["max_concurrent_hats"]
+    cloud_hats = []
+    local_hats = []
+    for hat_id in pre_gold:
+        hat_type = coordinator.classify_hat(config, hat_id, sensitive_mode)
+        if hat_type == "local":
+            local_hats.append(hat_id)
+        else:
+            cloud_hats.append(hat_id)
 
+    print(f"Dispatching: {len(cloud_hats)} cloud hats (parallel), "
+          f"{len(local_hats)} local hats (sequential)", file=sys.stderr)
+
+    # Step 6: Execute hats with concurrency orchestration
     reports = []
-    security_fast_path = False
+    security_fast_path_triggered = False
+    timed_out_hats = []
 
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futures = {pool.submit(run_hat, config, hat_id, diff_text, context): hat_id
-                   for hat_id in pre_gold}
+    # Run cloud hats in parallel via the cloud pool
+    cloud_futures = {}
+    for hat_id in cloud_hats:
+        future = coordinator.cloud_pool.submit(
+            run_hat, config, hat_id, diff_text, context, sensitive_mode, coordinator
+        )
+        cloud_futures[future] = hat_id
 
-        for future in as_completed(futures):
-            hat_id = futures[future]
-            try:
-                report = future.result()
-            except Exception as exc:
-                report = {
-                    "hat_id": hat_id,
-                    "hat_name": config["hats"][hat_id]["name"],
-                    "emoji": config["hats"][hat_id]["emoji"],
-                    "model_used": "N/A",
-                    "latency_seconds": 0,
-                    "token_usage": {"input": 0, "output": 0},
-                    "error": str(exc),
-                    "findings": [],
-                    "summary": "",
-                    "confidence": 0.0,
-                }
-            reports.append(report)
-            print(f"  {report['emoji']} {report['hat_name']}: "
-                  f"{len(report['findings'])} findings, {report['latency_seconds']:.1f}s"
-                  + (f" ⚠️ {report['error']}" if report['error'] else ""),
+    # Run local hats sequentially via the local queue
+    # (they'll acquire the lock inside run_hat)
+    local_futures = {}
+    for hat_id in local_hats:
+        future = coordinator.cloud_pool.submit(
+            run_hat, config, hat_id, diff_text, context, sensitive_mode, coordinator
+        )
+        local_futures[future] = hat_id
+
+    # Collect all results
+    all_futures = {**cloud_futures, **local_futures}
+    for future in as_completed(all_futures):
+        hat_id = all_futures[future]
+        try:
+            report = future.result()
+        except Exception as exc:
+            report = {
+                "hat_id": hat_id,
+                "hat_name": config["hats"][hat_id]["name"],
+                "emoji": config["hats"][hat_id]["emoji"],
+                "model_used": "N/A",
+                "latency_seconds": 0,
+                "token_usage": {"input": 0, "output": 0},
+                "error": str(exc),
+                "findings": [],
+                "summary": "",
+                "confidence": 0.0,
+                "timed_out": False,
+            }
+        reports.append(report)
+
+        # Update state
+        if report.get("timed_out"):
+            update_state(state, timed_out_hat=hat_id)
+            timed_out_hats.append(hat_id)
+        elif report.get("error"):
+            update_state(state, failed_hat=hat_id)
+        else:
+            update_state(state, completed_hat=hat_id)
+
+        print(f"  {report['emoji']} {report['hat_name']}: "
+              f"{len(report['findings'])} findings, {report['latency_seconds']:.1f}s"
+              + (f" ERROR: {report['error']}" if report['error'] else ""),
+              file=sys.stderr)
+
+        # Security fast-path gate (G2)
+        g2_result = gate_security_fast_path(config, report)
+        if g2_result["triggered"]:
+            security_fast_path_triggered = True
+            update_state(state, gate={"gate_id": "G2", "passed": False, "details": g2_result})
+            print("CRITICAL finding detected -- security fast-path triggered",
                   file=sys.stderr)
+            # Don't break — let running hats finish, but skip remaining unstarted ones
 
-            # Security fast-path gate (G2) — per SPEC.md §7
-            if config["gates"]["security_fast_path"]["enabled"]:
-                for finding in report["findings"]:
-                    if finding.get("severity", "").upper() == "CRITICAL":
-                        security_fast_path = True
-                        print("🚨 CRITICAL finding detected — security fast-path triggered",
-                              file=sys.stderr)
+    coordinator.shutdown()
 
-    # Step 4: Run Gold/CoVE last (always)
+    # Step 7: Run Gold/CoVE last (always)
     if "gold" in selected:
-        # Build CoVE context from all prior reports
         cove_context = json.dumps({
             "prior_hat_reports": [
                 {
@@ -540,29 +533,55 @@ def run_pipeline(diff_text: str, config: dict, requested_hats: list[str] | None 
                 }
                 for r in reports
             ],
-            "security_fast_path_triggered": security_fast_path,
+            "security_fast_path_triggered": security_fast_path_triggered,
+            "sensitive_mode": sensitive_mode,
         }, indent=2)
 
-        gold_report = run_hat(config, "gold", diff_text, context=cove_context)
+        gold_report = run_hat(config, "gold", diff_text, context=cove_context,
+                              sensitive_mode=False)
         reports.append(gold_report)
+        update_state(state, completed_hat="gold")
         print(f"  {gold_report['emoji']} {gold_report['hat_name']}: "
               f"{len(gold_report['findings'])} findings, {gold_report['latency_seconds']:.1f}s",
               file=sys.stderr)
 
-    # Step 5: Consolidate
-    consolidated = consolidate_reports(reports)
+    # Step 8: Consolidate findings with deduplication (SPEC §9.3)
+    consolidated = consolidate_findings(reports, timed_out_hats=timed_out_hats)
 
-    # Step 6: Compute risk score and verdict
+    # Step 9: Consistency Gate (G3)
+    g3_result = gate_consistency(consolidated["all_findings"])
+    update_state(state, gate={"gate_id": "G3", "passed": g3_result["verdict"] == "PASS",
+                              "details": {"contradictions": len(g3_result["contradictions"])}})
+
+    if g3_result["verdict"] == "CONFLICTS_DETECTED":
+        print(f"Consistency gate: {len(g3_result['contradictions'])} contradictions detected "
+              f"(flagged for CoVE resolution)", file=sys.stderr)
+
+    # Step 10: Compute risk score and verdict
     risk_score, verdict = compute_risk_score(config, consolidated["severity_counts"])
+
+    # Step 11: Final Decision Gate (G5)
+    g5_result = gate_final_decision(verdict, risk_score, config,
+                                    security_fast_path_triggered)
+    update_state(state, verdict=g5_result["verdict"], risk_score=risk_score,
+                 gate={"gate_id": "G5", "passed": g5_result["verdict"] == "ALLOW",
+                       "details": g5_result})
+
     print(f"\n{'='*60}", file=sys.stderr)
-    print(f"🎩 VERDICT: {verdict} (Risk Score: {risk_score}/100)", file=sys.stderr)
+    print(f"VERDICT: {g5_result['verdict']} (Risk Score: {risk_score}/100)", file=sys.stderr)
+    if g5_result["requires_human_review"]:
+        print(f"ACTION: {g5_result['action']}", file=sys.stderr)
     print(f"{'='*60}", file=sys.stderr)
 
-    # Step 7: Generate outputs
-    markdown = generate_markdown_report(consolidated, risk_score, verdict, selected, config)
+    # Finalize and save state
+    finalize_state(state)
+
+    # Step 12: Generate outputs
+    markdown = generate_markdown_report(consolidated, risk_score, g5_result["verdict"],
+                                       selected, config, sensitive_mode)
 
     json_report = {
-        "verdict": verdict,
+        "verdict": g5_result["verdict"],
         "risk_score": risk_score,
         "severity_counts": consolidated["severity_counts"],
         "hats_executed": consolidated["hats_executed"],
@@ -570,11 +589,15 @@ def run_pipeline(diff_text: str, config: dict, requested_hats: list[str] | None 
         "total_tokens": consolidated["total_tokens"],
         "hat_summaries": consolidated["hat_summaries"],
         "findings": consolidated["all_findings"],
-        "security_fast_path_triggered": security_fast_path,
+        "security_fast_path_triggered": security_fast_path_triggered,
+        "sensitive_mode": sensitive_mode,
+        "dedup_stats": consolidated.get("dedup_stats", {}),
+        "conflicts": consolidated.get("conflicts", []),
+        "not_evaluated_hats": consolidated.get("not_evaluated_hats", []),
     }
 
     return {
-        "verdict": verdict,
+        "verdict": g5_result["verdict"],
         "risk_score": risk_score,
         "markdown": markdown,
         "json_report": json_report,
@@ -588,7 +611,7 @@ def run_pipeline(diff_text: str, config: dict, requested_hats: list[str] | None 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="🎩 Hats Team Runner — run the Hats review pipeline on a diff"
+        description="Hats Team Runner -- run the Hats review pipeline on a diff"
     )
     parser.add_argument(
         "--diff", required=True,
@@ -619,17 +642,21 @@ def main():
         "--markdown-file", default=None,
         help="Path to write Markdown report"
     )
+    parser.add_argument(
+        "--run-id", default=None,
+        help="Run ID for state tracking"
+    )
 
     args = parser.parse_args()
 
-    # Preflight health check — fail fast with clear guidance
+    # Preflight health check
     issues = preflight_check()
-    has_errors = any(msg.startswith("❌") for msg in issues)
+    has_errors = any("not set" in msg.lower() or "OLLAMA_API_KEY" in msg for msg in issues)
     for msg in issues:
         print(msg, file=sys.stderr)
     if has_errors:
-        print("\n🛑 Cannot proceed — fix the errors above and try again.", file=sys.stderr)
-        print("   See FORK_SETUP.md for setup instructions.", file=sys.stderr)
+        print("\nCannot proceed -- fix the errors above and try again.", file=sys.stderr)
+        print("See FORK_SETUP.md for setup instructions.", file=sys.stderr)
         sys.exit(2)
 
     # Load config
@@ -643,7 +670,7 @@ def main():
             diff_text = fh.read()
 
     if not diff_text.strip():
-        print("⚠️ Empty diff — nothing to review.", file=sys.stderr)
+        print("Empty diff -- nothing to review.", file=sys.stderr)
         sys.exit(0)
 
     # Parse requested hats
@@ -653,7 +680,8 @@ def main():
 
     # Run pipeline
     result = run_pipeline(diff_text, config, requested_hats=requested_hats,
-                          context=args.context, output_format=args.output)
+                          context=args.context, output_format=args.output,
+                          run_id=args.run_id)
 
     # Output results
     if args.output in ("markdown", "both"):
@@ -677,9 +705,9 @@ def main():
         with open(github_output, "a", encoding="utf-8") as fh:
             fh.write(f"verdict={result['verdict']}\n")
             fh.write(f"risk_score={result['risk_score']}\n")
-            fh.write(f"hats_executed={result['consolidated']['hats_executed']}\n")
+            fh.write(f"hats_executed={result['consolidated'].get('hats_executed', 0)}\n")
 
-    # Exit code: 0 for ALLOW, 1 for ESCALATE/QUARANTINE
+    # Exit code: 0 for ALLOW, 1 for ESCALATE/QUARANTINE/BLOCKED
     if result["verdict"] != "ALLOW":
         sys.exit(1)
 

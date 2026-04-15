@@ -175,6 +175,18 @@ Categories to be illustrated:
 | **LangGraph state-recovery patterns** | Checkpoint-based recovery for agentic pipeline failures |
 | **Language-specific concurrency tools** | Rust: `std::sync` audit; Java: FindBugs concurrency rules |
 
+## Ollama Cloud Model Assignment
+
+| Role | Model | Context Window | SWE-bench |
+|------|-------|---------------|-----------|
+| Primary | deepseek-v3.2:cloud | 128K | ~67% |
+| Fallback | glm-5.1:cloud | 200K | ~77% |
+| Local (sensitive mode) | deepseek-r1:8b | 128K | ~42% |
+
+**Security Mode:** When sensitive content (credentials, PII, auth tokens) is detected in the diff, this hat automatically switches to its local model. No exceptions.
+
+---
+
 ## References
 
 - [AWS Well-Architected Framework — Reliability Pillar](https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/welcome.html)

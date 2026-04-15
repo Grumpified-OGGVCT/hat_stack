@@ -171,6 +171,18 @@ Patterns to be illustrated:
 | **GoF design patterns** | Plugin, strategy, observer, decorator pattern recognition |
 | **LangChain tool-registry patterns** | Extensible tool registration for agentic pipelines |
 
+## Ollama Cloud Model Assignment
+
+| Role | Model | Context Window | SWE-bench |
+|------|-------|---------------|-----------|
+| Primary | minimax-m2.7:cloud | 200K | ~78% |
+| Fallback | glm-5.1:cloud | 200K | ~77% |
+| Local (sensitive mode) | N/A -- always cloud | N/A | N/A |
+
+**Security Mode:** Cloud-only. No sensitive content processing -- see Black/Purple/Brown hats for credential analysis.
+
+---
+
 ## References
 
 - [Semantic Versioning Specification (semver.org)](https://semver.org/)
