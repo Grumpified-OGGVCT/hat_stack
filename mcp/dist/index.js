@@ -121,6 +121,21 @@ server.setRequestHandler(types_js_1.CallToolRequestSchema, async (request) => {
                     content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
                 };
             }
+            case "hats_skill_recommend": {
+                const taskDesc = args?.task_description;
+                const maxResults = args?.max_results || 5;
+                const categories = args?.categories;
+                if (!taskDesc) {
+                    return {
+                        content: [{ type: "text", text: "Error: 'task_description' parameter is required" }],
+                        isError: true,
+                    };
+                }
+                const result = await (0, hats_client_js_1.recommendSkills)(taskDesc, maxResults, categories);
+                return {
+                    content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+                };
+            }
             case "gremlin_kickoff": {
                 const scope = args?.scope || "all";
                 const result = await (0, hats_client_js_1.runGremlinKickoff)(scope);

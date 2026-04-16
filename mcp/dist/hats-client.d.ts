@@ -56,6 +56,11 @@ export declare function getConfig(): Promise<string>;
  */
 export declare function assembleTeam(taskDescription: string, maxCloud?: number, maxLocal?: number, priority?: "speed" | "thoroughness" | "budget", context?: string): Promise<unknown>;
 /**
+ * Recommend skills from the taxonomy based on a task description.
+ * Reads skills_taxonomy.json and matches by capability overlap and category.
+ */
+export declare function recommendSkills(taskDescription: string, maxResults?: number, categories?: string[]): Promise<unknown>;
+/**
  * Run a Gremlin review cycle (spawns gremlin_runner.py).
  */
 export declare function runGremlinKickoff(scope?: string): Promise<unknown>;

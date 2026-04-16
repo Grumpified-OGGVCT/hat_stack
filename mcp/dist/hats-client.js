@@ -45,6 +45,7 @@ exports.runHatTask = runHatTask;
 exports.listModels = listModels;
 exports.getConfig = getConfig;
 exports.assembleTeam = assembleTeam;
+exports.recommendSkills = recommendSkills;
 exports.runGremlinKickoff = runGremlinKickoff;
 exports.handleGremlinProposal = handleGremlinProposal;
 exports.readGremlinHerald = readGremlinHerald;
@@ -206,6 +207,90 @@ async function assembleTeam(taskDescription, maxCloud = 4, maxLocal = 1, priorit
         estimated_tokens: estimatedTokens,
         priority,
         total_hats: team.length,
+    };
+}
+// --- Skills recommendation function ---
+/**
+ * Recommend skills from the taxonomy based on a task description.
+ * Reads skills_taxonomy.json and matches by capability overlap and category.
+ */
+async function recommendSkills(taskDescription, maxResults = 5, categories) {
+    const fs = await import("fs");
+    const path = await import("path");
+    const taxonomyPath = path.join(MOLTBOOK_ROOT, ".gremlins", "experiments", "skills_taxonomy.json");
+    let taxonomy;
+    try {
+        const raw = fs.readFileSync(taxonomyPath, "utf-8");
+        taxonomy = JSON.parse(raw);
+    }
+    catch {
+        return {
+            error: "skills_taxonomy.json not found. Run the catalog phase first: gremlin_runner.py --phase catalog",
+            recommendations: [],
+        };
+    }
+    const skills = taxonomy.skills || [];
+    if (skills.length === 0) {
+        return { error: "No skills in taxonomy", recommendations: [] };
+    }
+    const taskLower = taskDescription.toLowerCase();
+    const taskWords = new Set(taskLower.split(/\s+/));
+    // Score each skill by relevance to the task description
+    const scored = skills.map((skill) => {
+        let score = 0;
+        const descLower = (skill.description || "").toLowerCase();
+        const nameLower = (skill.name || "").toLowerCase();
+        // Direct word overlap with description
+        for (const word of taskWords) {
+            if (word.length > 2 && descLower.includes(word)) {
+                score += 2;
+            }
+            if (word.length > 2 && nameLower.includes(word)) {
+                score += 3;
+            }
+        }
+        // Capability overlap
+        const capabilities = skill.capabilities || [];
+        for (const cap of capabilities) {
+            if (taskLower.includes(cap.replace(/_/g, " "))) {
+                score += 5;
+            }
+        }
+        // Category match
+        if (categories && categories.length > 0) {
+            if (categories.includes(skill.category)) {
+                score += 3;
+            }
+        }
+        // Trigger phrase overlap
+        const triggers = skill.trigger_phrases || [];
+        for (const trigger of triggers) {
+            const triggerLower = trigger.toLowerCase();
+            for (const word of taskWords) {
+                if (word.length > 3 && triggerLower.includes(word)) {
+                    score += 1;
+                }
+            }
+        }
+        return { ...skill, relevance_score: score };
+    });
+    // Sort by score, filter to relevant ones
+    const recommendations = scored
+        .filter((s) => s.relevance_score > 0)
+        .sort((a, b) => b.relevance_score - a.relevance_score)
+        .slice(0, maxResults)
+        .map((s) => ({
+        name: s.name,
+        description: s.description,
+        category: s.category,
+        capabilities: s.capabilities,
+        quality: s.quality,
+        relevance_score: s.relevance_score,
+    }));
+    return {
+        task: taskDescription,
+        total_skills_searched: skills.length,
+        recommendations,
     };
 }
 // --- Gremlin functions ---

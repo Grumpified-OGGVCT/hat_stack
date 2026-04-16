@@ -218,6 +218,8 @@ def build_candidates(config: dict, findings: list[dict], taxonomy: dict,
     """BUILD node: Generate candidate agent designs.
 
     Returns list of candidate dicts with: id, design_space, agent_py, config_json.
+    Calls the LLM via try_model_chain for each candidate, then parses the
+    JSON response to extract agent_py and config_json.
     """
     hat_id = "green"  # Green Hat — Evolution & Extensibility
     hat_def = config.get("hats", {}).get(hat_id, {})
@@ -235,6 +237,10 @@ def build_candidates(config: dict, findings: list[dict], taxonomy: dict,
 
     # Build capabilities string
     capabilities = ", ".join(taxonomy.get("capabilities", [])[:15]) or "general automation"
+
+    # Resolve model for the BUILD phase
+    model = resolve_gremlin_model(config, "experiment", hat_id)
+    fallback = hat_def.get("fallback_model")
 
     candidates = []
     # Half the candidates compose from skill pairs, half from random design space
@@ -268,6 +274,70 @@ def build_candidates(config: dict, findings: list[dict], taxonomy: dict,
         )
         if skill_context:
             prompt = skill_context + prompt
+
+        # Call the LLM to generate the candidate
+        system_prompt = "You are an agent designer. Produce valid JSON only."
+        result = try_model_chain(
+            config, model, fallback,
+            system_prompt, prompt,
+            temperature=0.4,
+            max_tokens=4096,
+            timeout=120,
+            hat_id="experiment_build",
+        )
+
+        candidate = {
+            "id": str(uuid.uuid4())[:8],
+            "design_space": ds,
+            "model": result.get("model", model),
+        }
+
+        if result["error"]:
+            candidate["error"] = f"LLM call failed: {result['error']}"
+            candidate["agent_py"] = ""
+            candidate["config_json"] = {}
+        else:
+            # Parse the LLM response as JSON
+            content = result["content"] or "{}"
+            # Strip markdown code fences and trailing sign-offs if present
+            content = re.sub(r'^```(?:json)?\s*\n?', '', content.strip())
+            content = re.sub(r'\n?```\s*$', '', content.strip())
+            content = re.sub(r'\n?--\s*Gremlin\s+Legion\s*$', '', content.strip())
+            try:
+                parsed = json.loads(content)
+                candidate["agent_py"] = parsed.get("agent_py", "")
+                candidate["config_json"] = parsed.get("config_json", {})
+            except (json.JSONDecodeError, ValueError):
+                # Try extracting JSON block from within the content
+                json_match = re.search(r'\{[\s\S]*\}', content)
+                if json_match:
+                    try:
+                        parsed = json.loads(json_match.group())
+                        candidate["agent_py"] = parsed.get("agent_py", "")
+                        candidate["config_json"] = parsed.get("config_json", {})
+                    except (json.JSONDecodeError, ValueError):
+                        # Last resort: use the raw content as agent_py
+                        candidate["agent_py"] = content
+                        candidate["config_json"] = {
+                            "name": f"candidate-{candidate['id']}",
+                            "description": "Auto-generated candidate (JSON parse failed)",
+                            "prompt_style": ds.get("prompt_style", "imperative"),
+                            "tool_set": ds.get("tool_set", []),
+                            "goal": ds.get("goal", "unknown"),
+                            "output_format": ds.get("output_format", "markdown"),
+                        }
+                else:
+                    candidate["agent_py"] = content
+                    candidate["config_json"] = {
+                        "name": f"candidate-{candidate['id']}",
+                        "description": "Auto-generated candidate (no JSON found)",
+                        "prompt_style": ds.get("prompt_style", "imperative"),
+                        "tool_set": ds.get("tool_set", []),
+                        "goal": ds.get("goal", "unknown"),
+                        "output_format": ds.get("output_format", "markdown"),
+                    }
+
+        candidates.append(candidate)
 
     return candidates
 
@@ -319,7 +389,22 @@ def evaluate_candidate(candidate: dict, config: dict) -> dict:
         }
 
     try:
-        parsed = json.loads(result["content"] or "{}")
+        # Strip markdown code fences and trailing sign-offs if present
+        eval_content = result["content"] or "{}"
+        eval_content = re.sub(r'^```(?:json)?\s*\n?', '', eval_content.strip())
+        eval_content = re.sub(r'\n?```\s*$', '', eval_content.strip())
+        # Remove trailing Gremlin sign-offs
+        eval_content = re.sub(r'\n?--\s*Gremlin\s+Legion\s*$', '', eval_content.strip())
+        # Try parsing directly first
+        try:
+            parsed = json.loads(eval_content)
+        except (json.JSONDecodeError, ValueError):
+            # Extract the first JSON object from the content
+            json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', eval_content)
+            if json_match:
+                parsed = json.loads(json_match.group())
+            else:
+                raise
         correctness = float(parsed.get("correctness", 0))
         latency = float(parsed.get("latency_estimate", 0))
         token_eff = float(parsed.get("token_efficiency", 0))

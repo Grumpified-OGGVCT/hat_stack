@@ -144,6 +144,34 @@ exports.HAT_STACK_TOOLS = [
         },
     },
     // --- Gremlin tools ---
+    // --- Skills taxonomy tool ---
+    {
+        name: "hats_skill_recommend",
+        description: "Recommend relevant skills from the _universal_skills/ taxonomy based on a task " +
+            "description. Uses semantic matching on capabilities, categories, and trigger phrases " +
+            "to find the best skill matches. Returns skill names, descriptions, categories, and " +
+            "capability overlap scores.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                task_description: {
+                    type: "string",
+                    description: "Description of the task or problem (e.g., 'building a Slack bot that posts notifications')",
+                },
+                max_results: {
+                    type: "number",
+                    description: "Maximum number of skill recommendations (default: 5)",
+                    default: 5,
+                },
+                categories: {
+                    type: "array",
+                    items: { type: "string" },
+                    description: "Filter to specific categories (automation, AI, research, etc.)",
+                },
+            },
+            required: ["task_description"],
+        },
+    },
     {
         name: "gremlin_kickoff",
         description: "Start a Gremlin review cycle. The Gremlin Legion runs an overnight-style " +
