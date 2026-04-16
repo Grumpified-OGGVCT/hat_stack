@@ -42,6 +42,11 @@ ollama pull gemma4:e2b    # 7.2GB, fast, good for most hats
 ```bash
 git clone https://github.com/Grumpified-OGGVCT/hat_stack.git
 cd hat_stack
+
+# Quick start: auto-checks, pulls model, runs sample review
+bash scripts/quickstart.sh
+
+# Or install manually:
 pip install -r scripts/requirements.txt
 
 # Review a diff file
@@ -57,6 +62,28 @@ python scripts/hats_runner.py --diff my-changes.patch --hats black,blue,purple
 ### 4. Done
 
 You'll get a verdict: **ALLOW**, **ESCALATE**, or **QUARANTINE** with a full report.
+
+### Large PR Workflow
+
+For large diffs (hundreds of files), run the security-critical hats trio first, then expand if needed:
+
+```bash
+# Step 1: Fast security check (3 hats, ~2-5 min)
+git diff main | python scripts/hats_runner.py --diff - --hats black,blue,purple
+
+# Step 2: If risk score is low, run the full team on the remaining scope
+git diff main | python scripts/hats_runner.py --diff -
+```
+
+### Quiet Mode (CI Pipelines)
+
+Use `--quiet` to print only the verdict, risk score, and hat count:
+
+```bash
+python scripts/hats_runner.py --diff my.patch --quiet --json-file report.json
+# Output: ALLOW risk=12/100 hats=5
+#         report=report.json
+```
 
 ---
 

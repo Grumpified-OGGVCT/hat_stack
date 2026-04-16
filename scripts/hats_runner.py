@@ -663,6 +663,10 @@ def main():
         "--checkpoint-dir", default=".hats/checkpoints",
         help="Directory for checkpoint files (default: .hats/checkpoints)"
     )
+    parser.add_argument(
+        "--quiet", action="store_true",
+        help="Quiet mode: only print verdict, risk score, and report path. Useful for CI pipelines."
+    )
 
     args = parser.parse_args()
 
@@ -715,20 +719,31 @@ def main():
                           checkpoint_dir=args.checkpoint_dir)
 
     # Output results
-    if args.output in ("markdown", "both"):
-        if args.markdown_file:
-            with open(args.markdown_file, "w", encoding="utf-8") as fh:
-                fh.write(result["markdown"])
-        else:
-            print(result["markdown"].encode(sys.stdout.encoding or "utf-8", errors="replace").decode(sys.stdout.encoding or "utf-8", errors="replace"))
-
-    if args.output in ("json", "both"):
-        json_str = json.dumps(result["json_report"], indent=2)
+    if args.quiet:
+        # Quiet mode: only print verdict, risk score, and report path
+        verdict = result["verdict"]
+        risk = result["risk_score"]
+        hats = result["consolidated"].get("hats_executed", 0)
+        print(f"{verdict} risk={risk}/100 hats={hats}")
         if args.json_file:
-            with open(args.json_file, "w", encoding="utf-8") as fh:
-                fh.write(json_str)
-        elif args.output == "json":
-            print(json_str)
+            print(f"report={args.json_file}", file=sys.stderr)
+        elif args.markdown_file:
+            print(f"report={args.markdown_file}", file=sys.stderr)
+    else:
+        if args.output in ("markdown", "both"):
+            if args.markdown_file:
+                with open(args.markdown_file, "w", encoding="utf-8") as fh:
+                    fh.write(result["markdown"])
+            else:
+                print(result["markdown"].encode(sys.stdout.encoding or "utf-8", errors="replace").decode(sys.stdout.encoding or "utf-8", errors="replace"))
+
+        if args.output in ("json", "both"):
+            json_str = json.dumps(result["json_report"], indent=2)
+            if args.json_file:
+                with open(args.json_file, "w", encoding="utf-8") as fh:
+                    fh.write(json_str)
+            elif args.output == "json":
+                print(json_str)
 
     # Set GitHub Actions outputs if running in CI
     github_output = os.environ.get("GITHUB_OUTPUT")

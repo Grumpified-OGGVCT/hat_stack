@@ -818,6 +818,10 @@ def main():
         "--source-issue", default=None,
         help="Source issue number for manifest metadata"
     )
+    parser.add_argument(
+        "--quiet", action="store_true",
+        help="Quiet mode: only print verdict and output path. Useful for CI pipelines."
+    )
 
     args = parser.parse_args()
 
@@ -905,8 +909,13 @@ def main():
             fh.write(f"files_generated={len(result['files'])}\n")
             fh.write(f"hats_executed={result['stats']['hats_executed']}\n")
 
-    print(f"\nTask complete: {len(result['files'])} files generated, "
-          f"{result['stats']['hats_executed']} hats used", file=sys.stderr)
+    if args.quiet:
+        # Quiet mode: only print task type and output directory
+        print(f"{result['task_type']} files={len(result['files'])} hats={result['stats']['hats_executed']}")
+        print(f"output={output_dir}", file=sys.stderr)
+    else:
+        print(f"\nTask complete: {len(result['files'])} files generated, "
+              f"{result['stats']['hats_executed']} hats used", file=sys.stderr)
 
 
 if __name__ == "__main__":
