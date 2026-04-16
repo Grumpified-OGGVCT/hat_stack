@@ -253,32 +253,47 @@ def truncate_to_context_window(text: str, context_window: int, reserve_output: i
 # Ollama Cloud API caller with retry + circuit breaker
 # ---------------------------------------------------------------------------
 
+def _is_local_model(config: dict, model: str) -> bool:
+    """Check if a model is configured as local (runs on localhost Ollama)."""
+    models_cfg = config.get("models", {})
+    model_cfg = models_cfg.get(model, {})
+    return bool(model_cfg.get("local", False))
+
+
 def call_ollama(config: dict, model: str, system_prompt: str, user_prompt: str,
                 temperature: float = 0.3, max_tokens: int = 4096,
                 timeout: int = 120, retry_policy: RetryPolicy | None = None,
                 hat_id: str | None = None) -> dict:
-    """Call the Ollama Cloud OpenAI-compatible chat completions endpoint.
+    """Call an Ollama model — local or cloud — via the native Ollama API.
+
+    Uses /api/chat endpoint (native Ollama format, not OpenAI-compatible).
+    Local models route to localhost:11434/api/chat (no auth).
+    Cloud models route to https://ollama.com/api/chat (Bearer token).
 
     Implements SPEC §8 retry policy with exponential backoff and jitter.
     Implements SPEC §8.3 circuit breaker (per-hat and per-provider).
     Truncates input to model's context window before sending.
     """
-    api_cfg = config["api"]
-    base_url = os.environ.get(
-        api_cfg.get("base_url_env", "OLLAMA_BASE_URL"),
-        api_cfg.get("default_base_url", "https://api.ollama.ai/v1"),
-    )
-    api_key = os.environ.get(
-        api_cfg.get("api_key_env", "OLLAMA_API_KEY"), ""
-    )
+    is_local = _is_local_model(config, model)
 
-    if not api_key:
-        return {
-            "error": "OLLAMA_API_KEY not set",
-            "model": model,
-            "content": None,
-            "usage": {"input": 0, "output": 0},
-        }
+    if is_local:
+        base_url = os.environ.get(
+            "OLLAMA_LOCAL_URL", "http://localhost:11434"
+        )
+        api_key = None
+    else:
+        base_url = os.environ.get(
+            "OLLAMA_CLOUD_URL", "https://ollama.com"
+        )
+        api_key = os.environ.get("OLLAMA_API_KEY", "")
+
+        if not api_key:
+            return {
+                "error": "OLLAMA_API_KEY not set (required for cloud model)",
+                "model": model,
+                "content": None,
+                "usage": {"input": 0, "output": 0},
+            }
 
     # Truncate input to fit context window
     models_cfg = config.get("models", {})
@@ -286,8 +301,6 @@ def call_ollama(config: dict, model: str, system_prompt: str, user_prompt: str,
     context_window = model_cfg.get("context_window", 128000)
     combined_input = system_prompt + "\n" + user_prompt
     truncated_input = truncate_to_context_window(combined_input, context_window, reserve_output=max_tokens)
-    # Split back into system/user approximately — system prompt stays intact,
-    # user prompt gets truncated
     if len(combined_input) > (context_window - max_tokens) * 4:
         user_prompt = truncated_input[len(system_prompt) + 1:]
 
@@ -298,11 +311,17 @@ def call_ollama(config: dict, model: str, system_prompt: str, user_prompt: str,
     # Determine provider from model name for circuit breaker
     provider = model.split(":")[0] if ":" in model else "default"
 
-    url = f"{base_url.rstrip('/')}/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
+    # Native Ollama /api/chat endpoint
+    url = f"{base_url.rstrip('/')}/api/chat"
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    # Thinking models (gemma4) need more num_predict because thinking tokens
+    # count toward the limit. Double the budget for thinking models.
+    effective_num_predict = max_tokens
+    if model.startswith("gemma4:"):
+        effective_num_predict = max_tokens * 2
 
     last_error = None
 
@@ -315,22 +334,34 @@ def call_ollama(config: dict, model: str, system_prompt: str, user_prompt: str,
             last_error = f"Circuit breaker OPEN for provider {provider}"
             break
 
+        # Native Ollama /api/chat payload format
         payload = {
             "model": model,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "response_format": {"type": "json_object"},
+            "stream": False,
+            "options": {
+                "temperature": temperature,
+                "num_predict": effective_num_predict,
+                "num_ctx": config.get("execution", {}).get("local_num_ctx", 8192) if is_local else 32768,
+            },
         }
+
+        # Use Ollama format="json" for JSON mode — works on all models
+        # that support it. All local models in our pool handle JSON mode.
+        json_mode_models = (
+            "gemma4:e2b", "gemma4:e4b", "qwen3.5:9b", "gemma3:12b",
+            "granite3.3:8b", "phi4-mini:3.8b",
+        )
+        if not is_local or model in json_mode_models:
+            payload["format"] = "json"
 
         try:
             resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
 
             if resp.status_code in (429, 500, 502, 503, 504):
-                # Server error — potentially retryable
                 error_msg = f"HTTP {resp.status_code}: {resp.text[:200]}"
                 _circuit_breakers.record_failure("provider", provider)
                 if hat_id:
@@ -351,8 +382,12 @@ def call_ollama(config: dict, model: str, system_prompt: str, user_prompt: str,
 
             resp.raise_for_status()
             data = resp.json()
-            choice = data.get("choices", [{}])[0]
-            usage = data.get("usage", {})
+
+            # Native /api/chat response format: message.content at top level
+            message = data.get("message", {})
+            content = message.get("content", "")
+            # Thinking models put reasoning in message.thinking
+            thinking = message.get("thinking", "")
 
             # Record success
             _circuit_breakers.record_success("provider", provider)
@@ -362,10 +397,11 @@ def call_ollama(config: dict, model: str, system_prompt: str, user_prompt: str,
             return {
                 "error": None,
                 "model": model,
-                "content": choice.get("message", {}).get("content", ""),
+                "content": content,
+                "thinking": thinking if thinking else None,
                 "usage": {
-                    "input": usage.get("prompt_tokens", 0),
-                    "output": usage.get("completion_tokens", 0),
+                    "input": data.get("prompt_eval_count", 0),
+                    "output": data.get("eval_count", 0),
                 },
             }
 
@@ -482,14 +518,24 @@ def build_comparable_model_sequence(
     config: dict,
     primary_model: str,
     fallback_model: str | None = None,
+    local_only: bool = False,
 ) -> list[str]:
-    """Build a prioritized model fallback list using comparable configured tiers."""
+    """Build a prioritized model fallback list using comparable configured tiers.
+
+    If local_only=True, only include models marked as local in the config.
+    """
     models_cfg = config.get("models", {})
+    has_cloud_key = bool(os.environ.get("OLLAMA_API_KEY", "").strip())
+
     seen = set()
     ordered_models = []
 
     def add(model_name: str | None):
         if model_name and model_name in models_cfg and model_name not in seen:
+            # Skip cloud models when local_only or no API key
+            if local_only or not has_cloud_key:
+                if not models_cfg[model_name].get("local", False):
+                    return
             ordered_models.append(model_name)
             seen.add(model_name)
 
@@ -550,20 +596,26 @@ def estimate_cost(config: dict, selected_hats: list[str], diff_tokens: int) -> t
 class LocalModelQueue:
     """Enforces that only one local model runs at a time.
 
-    Local models (phi4-mini, gemma3:4b, deepseek-r1, granite3.3, gemma3:12b)
-    are serialized through this queue. A threading.Lock ensures mutual exclusion.
+    Local models are serialized through this queue. A threading.Lock ensures
+    mutual exclusion. Tracks ownership to prevent "release unlocked lock" errors.
     """
 
     def __init__(self):
         self._lock = threading.Lock()
+        self._owned_by = None  # Thread identity that holds the lock
 
     def acquire(self, timeout: float = 600.0) -> bool:
         """Acquire the local model slot. Returns True if acquired."""
-        return self._lock.acquire(timeout=timeout)
+        acquired = self._lock.acquire(timeout=timeout)
+        if acquired:
+            self._owned_by = threading.get_ident()
+        return acquired
 
     def release(self):
-        """Release the local model slot."""
-        self._lock.release()
+        """Release the local model slot. Safe to call if not owned."""
+        if self._owned_by == threading.get_ident():
+            self._owned_by = None
+            self._lock.release()
 
     def __enter__(self):
         self.acquire()
@@ -677,27 +729,65 @@ class ConcurrencyCoordinator:
 # Preflight health check
 # ---------------------------------------------------------------------------
 
-def preflight_check() -> list[str]:
+def preflight_check(config: dict | None = None, requested_hats: list[str] | None = None) -> list[str]:
     """Check that required environment is configured.
 
     Returns a list of warning/error messages. Empty list = all good.
+    If config is provided, only requires OLLAMA_API_KEY when cloud models are needed.
+    If requested_hats is provided, only checks models for those specific hats.
     """
     issues = []
 
     api_key = os.environ.get("OLLAMA_API_KEY", "").strip()
-    if not api_key:
+
+    # Determine which hats will actually run
+    hats_cfg = config.get("hats", {}) if config else {}
+    if requested_hats:
+        active_hats = {k: v for k, v in hats_cfg.items() if k in requested_hats}
+    else:
+        active_hats = hats_cfg
+
+    # Check if any active hats need cloud models
+    needs_cloud = any(not h.get("local_only", False) for h in active_hats.values()) if active_hats else True
+
+    if not api_key and needs_cloud:
         issues.append(
-            "OLLAMA_API_KEY is not set.\n"
-            "   For GitHub Actions: Add it as a Repository Secret\n"
-            "     (Settings > Secrets and variables > Actions > New repository secret)\n"
-            "   For local use: Copy .env.example to .env and fill in your key\n"
-            "   Get a key at: https://ollama.ai/cloud"
+            "WARNING: OLLAMA_API_KEY is not set.\n"
+            "   Cloud models will fail and fall back to local models.\n"
+            "   For full cloud model support, set your key:\n"
+            "     GitHub Actions: Add as Repository Secret\n"
+            "     Local: Copy .env.example to .env and fill in your key\n"
+            "     Get a key at: https://ollama.com/settings/keys"
         )
 
-    base_url = os.environ.get("OLLAMA_BASE_URL", "").strip()
-    if not base_url:
+    # Check if any active hats need local models
+    models_cfg = config.get("models", {}) if config else {}
+    active_models = set()
+    for hat_cfg in active_hats.values():
+        active_models.add(hat_cfg.get("primary_model", ""))
+        if hat_cfg.get("fallback_model"):
+            active_models.add(hat_cfg["fallback_model"])
+        if hat_cfg.get("local_model"):
+            active_models.add(hat_cfg["local_model"])
+
+    needs_local = any(models_cfg.get(m, {}).get("local", False) for m in active_models if m) if models_cfg else False
+
+    if needs_local:
+        local_url = os.environ.get("OLLAMA_LOCAL_URL", "http://localhost:11434")
+        try:
+            resp = requests.get(f"{local_url}/api/version", timeout=3)
+            if resp.status_code != 200:
+                issues.append(f"Local Ollama at {local_url} returned status {resp.status_code}")
+        except requests.exceptions.RequestException:
+            issues.append(
+                f"Local Ollama server not reachable at {local_url}.\n"
+                "   Start it with: ollama serve"
+            )
+
+    cloud_url = os.environ.get("OLLAMA_CLOUD_URL", "").strip()
+    if not cloud_url and needs_cloud and api_key:
         issues.append(
-            "OLLAMA_BASE_URL not set — using default: https://api.ollama.ai/v1"
+            "OLLAMA_CLOUD_URL not set — using default: https://ollama.com"
         )
 
     return issues

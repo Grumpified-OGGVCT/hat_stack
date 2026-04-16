@@ -25,31 +25,36 @@ from hats_common import (
 # Minimal config for testing
 TEST_CONFIG = {
     "api": {
-        "base_url_env": "OLLAMA_BASE_URL",
-        "default_base_url": "https://api.ollama.ai/v1",
+        "cloud_url_env": "OLLAMA_CLOUD_URL",
+        "default_cloud_url": "https://ollama.com",
+        "local_url_env": "OLLAMA_LOCAL_URL",
+        "default_local_url": "http://localhost:11434",
         "api_key_env": "OLLAMA_API_KEY",
     },
     "models": {
         "glm-5.1:cloud": {"tier": 1, "context_window": 200000, "input_cost_per_m": 0.40, "output_cost_per_m": 1.10, "local": False},
         "deepseek-v3.2:cloud": {"tier": 1, "context_window": 128000, "input_cost_per_m": 0.10, "output_cost_per_m": 0.28, "local": False},
         "devstral-2:123b-cloud": {"tier": 2, "context_window": 256000, "input_cost_per_m": 0.15, "output_cost_per_m": 0.60, "local": False},
+        "gemma4:e2b": {"tier": 0, "context_window": 128000, "input_cost_per_m": 0.0, "output_cost_per_m": 0.0, "local": True},
+        "gemma4:e4b": {"tier": 0, "context_window": 128000, "input_cost_per_m": 0.0, "output_cost_per_m": 0.0, "local": True},
+        "qwen3.5:9b": {"tier": 0, "context_window": 128000, "input_cost_per_m": 0.0, "output_cost_per_m": 0.0, "local": True},
         "phi4-mini:3.8b": {"tier": 0, "context_window": 128000, "input_cost_per_m": 0.0, "output_cost_per_m": 0.0, "local": True},
         "gemma3:4b": {"tier": 0, "context_window": 128000, "input_cost_per_m": 0.0, "output_cost_per_m": 0.0, "local": True},
     },
     "hats": {
         "black": {"name": "Black Hat", "emoji": "⚫", "number": 2, "always_run": True,
                   "primary_model": "devstral-2:123b-cloud", "fallback_model": "glm-5.1:cloud",
-                  "local_model": "gemma3:4b", "local_only": False,
+                  "local_model": "gemma4:e4b", "local_only": False,
                   "temperature": 0.2, "max_tokens": 4096, "timeout_seconds": 150, "triggers": [],
                   "persona": "Test persona"},
         "blue": {"name": "Blue Hat", "emoji": "🔵", "number": 6, "always_run": True,
-                 "primary_model": "phi4-mini:3.8b", "fallback_model": "gemma3:4b",
-                 "local_model": "phi4-mini:3.8b", "local_only": True,
-                 "temperature": 0.1, "max_tokens": 2048, "timeout_seconds": 60, "triggers": [],
+                 "primary_model": "gemma4:e2b", "fallback_model": "gemma4:e4b",
+                 "local_model": "gemma4:e2b", "local_only": True,
+                 "temperature": 0.1, "max_tokens": 2048, "timeout_seconds": 300, "triggers": [],
                  "persona": "Test persona"},
         "red": {"name": "Red Hat", "emoji": "🔴", "number": 1, "always_run": False,
                 "primary_model": "deepseek-v3.2:cloud", "fallback_model": "glm-5.1:cloud",
-                "local_model": "deepseek-r1:8b",
+                "local_model": "qwen3.5:9b",
                 "temperature": 0.3, "max_tokens": 4096, "timeout_seconds": 120,
                 "triggers": ["error", "retry"], "persona": "Test persona"},
     },
@@ -95,10 +100,27 @@ def test_detect_sensitive_mode_changed_files():
 
 
 def test_build_comparable_model_sequence():
-    chain = build_comparable_model_sequence(TEST_CONFIG, "glm-5.1:cloud", "deepseek-v3.2:cloud")
-    assert chain[0] == "glm-5.1:cloud"
-    assert chain[1] == "deepseek-v3.2:cloud"
-    assert len(chain) >= 2
+    # When OLLAMA_API_KEY is set, cloud models should appear
+    original_key = os.environ.get("OLLAMA_API_KEY")
+    try:
+        os.environ["OLLAMA_API_KEY"] = "test-key"
+        chain = build_comparable_model_sequence(TEST_CONFIG, "glm-5.1:cloud", "deepseek-v3.2:cloud")
+        assert chain[0] == "glm-5.1:cloud"
+        assert chain[1] == "deepseek-v3.2:cloud"
+        assert len(chain) >= 2
+
+        # Without API key, cloud models are filtered out
+        del os.environ["OLLAMA_API_KEY"]
+        chain_local = build_comparable_model_sequence(TEST_CONFIG, "glm-5.1:cloud", "deepseek-v3.2:cloud")
+        # Only local models should appear
+        for m in chain_local:
+            assert TEST_CONFIG["models"][m].get("local", False) is True
+        assert len(chain_local) >= 1
+    finally:
+        if original_key:
+            os.environ["OLLAMA_API_KEY"] = original_key
+        elif "OLLAMA_API_KEY" in os.environ:
+            del os.environ["OLLAMA_API_KEY"]
 
 
 def test_estimate_cost():
@@ -203,12 +225,12 @@ def test_concurrency_coordinator_classify():
 
 def test_concurrency_coordinator_model_selection():
     coord = ConcurrencyCoordinator(max_cloud=4)
-    # Blue always uses local model
-    assert coord.get_model_for_hat(TEST_CONFIG, "blue", sensitive_mode=False) == "phi4-mini:3.8b"
+    # Blue always uses local model (gemma4:e2b)
+    assert coord.get_model_for_hat(TEST_CONFIG, "blue", sensitive_mode=False) == "gemma4:e2b"
     # Black uses cloud model normally
     assert coord.get_model_for_hat(TEST_CONFIG, "black", sensitive_mode=False) == "devstral-2:123b-cloud"
-    # Black uses local model when sensitive
-    assert coord.get_model_for_hat(TEST_CONFIG, "black", sensitive_mode=True) == "gemma3:4b"
+    # Black uses local model when sensitive (gemma4:e4b)
+    assert coord.get_model_for_hat(TEST_CONFIG, "black", sensitive_mode=True) == "gemma4:e4b"
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@ Hats Team Runner -- GitHub Actions Orchestrator
 
 Implements the Conductor logic from the Hats Team Specification:
   - Hat selection based on diff triggers (via hat_selector.py)
-  - Tiered-parallel execution via Ollama Cloud API (cloud pool + local queue)
+  - Tiered-parallel execution via Ollama API (cloud pool + local queue)
   - Gate engine: cost budget (G1), security fast-path (G2), consistency (G3),
     timeout (G4), final decision (G5) (via gates.py)
   - Consolidation and deduplication (via consolidator.py)
@@ -16,8 +16,9 @@ Usage:
   python hats_runner.py --diff <diff_text_or_file> [--hats black,blue,...] [--config hat_configs.yml]
 
 Environment:
-  OLLAMA_API_KEY   -- Ollama Cloud API key (required)
-  OLLAMA_BASE_URL  -- API base URL (default: https://api.ollama.ai/v1)
+  OLLAMA_API_KEY    -- Ollama Cloud API key (required for cloud models)
+  OLLAMA_CLOUD_URL  -- Cloud API URL (default: https://ollama.com)
+  OLLAMA_LOCAL_URL   -- Local Ollama URL (default: http://localhost:11434)
 """
 
 import argparse
@@ -162,8 +163,18 @@ def run_hat(config: dict, hat_id: str, diff_text: str, context: str = "",
     }
 
     if result["content"]:
+        raw = result["content"].strip()
+        # Strip markdown code fences if present (models sometimes wrap JSON in ```json ... ```)
+        if raw.startswith("```"):
+            lines = raw.split("\n")
+            # Remove first line (```json or ```) and last line (```)
+            if lines[-1].strip() == "```":
+                lines = lines[1:-1]
+            else:
+                lines = lines[1:]
+            raw = "\n".join(lines).strip()
         try:
-            parsed = json.loads(result["content"])
+            parsed = json.loads(raw)
             report["findings"] = parsed.get("findings", [])
             report["summary"] = parsed.get("summary", "")
             report["confidence"] = parsed.get("confidence", 0.0)
@@ -649,18 +660,19 @@ def main():
 
     args = parser.parse_args()
 
+    # Load config first (needed for preflight to know if cloud models are required)
+    config = load_config(args.config)
+
     # Preflight health check
-    issues = preflight_check()
-    has_errors = any("not set" in msg.lower() or "OLLAMA_API_KEY" in msg for msg in issues)
+    requested_hat_ids = [h.strip() for h in args.hats.split(",")] if args.hats else None
+    issues = preflight_check(config, requested_hats=requested_hat_ids)
+    has_errors = any("not reachable" in msg.lower() for msg in issues)
     for msg in issues:
         print(msg, file=sys.stderr)
     if has_errors:
         print("\nCannot proceed -- fix the errors above and try again.", file=sys.stderr)
         print("See FORK_SETUP.md for setup instructions.", file=sys.stderr)
         sys.exit(2)
-
-    # Load config
-    config = load_config(args.config)
 
     # Read diff
     if args.diff == "-":
@@ -689,7 +701,7 @@ def main():
             with open(args.markdown_file, "w", encoding="utf-8") as fh:
                 fh.write(result["markdown"])
         else:
-            print(result["markdown"])
+            print(result["markdown"].encode(sys.stdout.encoding or "utf-8", errors="replace").decode(sys.stdout.encoding or "utf-8", errors="replace"))
 
     if args.output in ("json", "both"):
         json_str = json.dumps(result["json_report"], indent=2)

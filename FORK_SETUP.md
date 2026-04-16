@@ -24,8 +24,8 @@ Add these secrets:
 
 | Secret Name | Required? | Description |
 |------------|-----------|-------------|
-| `OLLAMA_API_KEY` | ✅ **Yes** | Your Ollama Cloud API key ([get one here](https://ollama.ai/cloud)) |
-| `OLLAMA_BASE_URL` | ❌ No | API base URL (default: `https://api.ollama.ai/v1`) |
+| `OLLAMA_API_KEY` | ✅ **Yes** | Your Ollama Cloud API key ([get one here](https://ollama.com/settings/keys)) |
+| `OLLAMA_CLOUD_URL` | ❌ No | Cloud API URL (default: `https://ollama.com`) |
 | `HAT_STACK_CALLBACK_TOKEN` | ❌ No | GitHub PAT for posting results to other repos' PRs (only needed for dispatch mode) |
 
 That's it. **Two minutes, one secret.**

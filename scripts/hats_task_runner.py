@@ -25,8 +25,9 @@ Usage:
     --output /tmp/hats-task-output
 
 Environment:
-  OLLAMA_API_KEY   -- Ollama Cloud API key (required)
-  OLLAMA_BASE_URL  -- API base URL (default: https://api.ollama.ai/v1)
+  OLLAMA_API_KEY    -- Ollama Cloud API key (required for cloud models)
+  OLLAMA_CLOUD_URL   -- Cloud API URL (default: https://ollama.com)
+  OLLAMA_LOCAL_URL   -- Local Ollama URL (default: http://localhost:11434)
 """
 
 import argparse
@@ -811,17 +812,19 @@ def main():
                 f"workspace_root={workspace_info['workspace_root'] or ''}\n"
             )
 
+    # Load config first (needed for preflight to know if cloud models are required)
+    config = load_config(args.config)
+
     # Preflight
-    issues = preflight_check()
-    has_errors = any("not set" in msg.lower() or "OLLAMA_API_KEY" in msg for msg in issues)
+    requested_hat_ids = [h.strip() for h in args.hats.split(",")] if args.hats else None
+    issues = preflight_check(config, requested_hats=requested_hat_ids)
+    has_errors = any("not reachable" in msg.lower() for msg in issues)
     for msg in issues:
         print(msg, file=sys.stderr)
     if has_errors:
-        print("\nCannot proceed -- set OLLAMA_API_KEY.", file=sys.stderr)
+        print("\nCannot proceed -- fix the errors above and try again.", file=sys.stderr)
         print("See FORK_SETUP.md for setup instructions.", file=sys.stderr)
         sys.exit(2)
-
-    config = load_config(args.config)
 
     # Load context files if provided
     context_files = None

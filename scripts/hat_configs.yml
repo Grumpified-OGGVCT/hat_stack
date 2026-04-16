@@ -1,14 +1,16 @@
 # Hat-to-Model Configuration
 # Based on HATS_TEAM_IMPLEMENTATION_GUIDE.md + soul.md model pool merge
-# Models reference Ollama Cloud (OpenAI-compatible API) for cloud models
-# and Ollama local for local-only models
+# Uses native Ollama API (/api/chat) for both local and cloud models
+# Local models → localhost:11434/api/chat (no auth)
+# Cloud models → ollama.com/api/chat (Bearer token via OLLAMA_API_KEY)
 #
 # Model pool per soul.md (April 2026):
 #   Tier 1 (Critical Reasoning): glm-5.1:cloud, kimi-k2.5:cloud, deepseek-v3.2:cloud
 #   Tier 2 (Architectural):       minimax-m2.7:cloud, devstral-2:123b-cloud
 #   Tier 3 (Quality Analysis):    nemotron-3-super:cloud, qwen3-coder:480b-cloud
 #   Tier 4 (Fast Scanning):       nemotron-3-nano:cloud, ministral-3:cloud
-#   Tier L (Local Only):          phi4-mini:3.8b, gemma3:4b, gemma3:12b,
+#   Tier L (Local Only):          gemma4:e2b, gemma4:e4b, qwen3.5:9b,
+#                                 phi4-mini:3.8b, gemma3:4b, gemma3:12b,
 #                                 deepseek-r1:8b, granite3.3:8b
 #
 # Security rule (from soul.md):
@@ -16,8 +18,10 @@
 #   tokens gets a LOCAL model sub-agent. No exceptions.
 
 api:
-  base_url_env: OLLAMA_BASE_URL
-  default_base_url: "https://api.ollama.ai/v1"
+  cloud_url_env: OLLAMA_CLOUD_URL
+  default_cloud_url: "https://ollama.com"
+  local_url_env: OLLAMA_LOCAL_URL
+  default_local_url: "http://localhost:11434"
   api_key_env: OLLAMA_API_KEY
 
 models:
@@ -93,6 +97,29 @@ models:
     swe_bench: 35.0
 
   # --- Local Models (Tier L — never leave the machine) ---
+  # Fast local models (Tier L1 — always-local hats, <5GB, fast inference)
+  gemma4:e2b:
+    tier: 0
+    context_window: 128000
+    input_cost_per_m: 0.0
+    output_cost_per_m: 0.0
+    local: true
+    swe_bench: 24.5
+  gemma4:e4b:
+    tier: 0
+    context_window: 128000
+    input_cost_per_m: 0.0
+    output_cost_per_m: 0.0
+    local: true
+    swe_bench: 36.0
+  qwen3.5:9b:
+    tier: 0
+    context_window: 128000
+    input_cost_per_m: 0.0
+    output_cost_per_m: 0.0
+    local: true
+    swe_bench: 42.0
+  # Legacy local models (still available)
   phi4-mini:3.8b:
     tier: 0
     context_window: 128000
@@ -140,7 +167,7 @@ hats:
     always_run: false
     primary_model: "deepseek-v3.2:cloud"
     fallback_model: "glm-5.1:cloud"
-    local_model: "deepseek-r1:8b"
+    local_model: "qwen3.5:9b"
     temperature: 0.3
     max_tokens: 4096
     timeout_seconds: 120
@@ -166,11 +193,11 @@ hats:
     always_run: true
     primary_model: "devstral-2:123b-cloud"
     fallback_model: "kimi-k2.5:cloud"
-    local_model: "gemma3:12b"
+    local_model: "gemma4:e4b"
     local_only: false  # Dual-mode: switches to local for auth/credential code
     temperature: 0.2
     max_tokens: 4096
-    timeout_seconds: 150
+    timeout_seconds: 300
     triggers: []  # Always runs
     persona: |
       You are BlackHat, an elite adversarial security analyst specializing
@@ -183,13 +210,13 @@ hats:
     emoji: "⚪"
     number: 3
     always_run: false
-    primary_model: "phi4-mini:3.8b"
-    fallback_model: "gemma3:4b"
-    local_model: "phi4-mini:3.8b"
+    primary_model: "gemma4:e2b"
+    fallback_model: "gemma4:e4b"
+    local_model: "gemma4:e2b"
     local_only: true  # Always local — deterministic, cheap, security-compliant
     temperature: 0.1
     max_tokens: 2048
-    timeout_seconds: 90
+    timeout_seconds: 300
     triggers:
       - "loop"
       - "query"
@@ -253,13 +280,13 @@ hats:
     emoji: "🔵"
     number: 6
     always_run: true
-    primary_model: "phi4-mini:3.8b"
-    fallback_model: "gemma3:4b"
-    local_model: "phi4-mini:3.8b"
+    primary_model: "gemma4:e2b"
+    fallback_model: "gemma4:e4b"
+    local_model: "gemma4:e2b"
     local_only: true  # Always local — rule-based, cheap, security-compliant
     temperature: 0.1
     max_tokens: 2048
-    timeout_seconds: 60
+    timeout_seconds: 300
     triggers: []  # Always runs
     persona: |
       You are BlueHat, a process and specification compliance analyst. You verify
@@ -317,11 +344,11 @@ hats:
     always_run: true
     primary_model: "glm-5.1:cloud"
     fallback_model: "deepseek-v3.2:cloud"
-    local_model: "deepseek-r1:8b"
+    local_model: "gemma4:e4b"
     local_only: false  # Dual-mode: switches to local for PII/user data
     temperature: 0.2
     max_tokens: 4096
-    timeout_seconds: 150
+    timeout_seconds: 300
     triggers: []  # Always runs
     persona: |
       You are PurpleHat, an AI safety and alignment specialist. You evaluate
@@ -357,13 +384,13 @@ hats:
     emoji: "🪨"
     number: 11
     always_run: false
-    primary_model: "gemma3:4b"
-    fallback_model: "phi4-mini:3.8b"
-    local_model: "gemma3:4b"
+    primary_model: "gemma4:e2b"
+    fallback_model: "gemma4:e4b"
+    local_model: "gemma4:e2b"
     local_only: true  # Always local — deterministic token counting
     temperature: 0.1
     max_tokens: 2048
-    timeout_seconds: 60
+    timeout_seconds: 300
     triggers:
       - "prompt"
       - "context"
@@ -405,7 +432,7 @@ hats:
     always_run: false
     primary_model: "deepseek-v3.2:cloud"
     fallback_model: "glm-5.1:cloud"
-    local_model: "deepseek-r1:8b"
+    local_model: "qwen3.5:9b"
     local_only: false  # Dual-mode: switches to local for PII analysis
     temperature: 0.2
     max_tokens: 4096
@@ -453,13 +480,13 @@ hats:
     emoji: "♿"
     number: 15
     always_run: false
-    primary_model: "phi4-mini:3.8b"
-    fallback_model: "gemma3:4b"
-    local_model: "phi4-mini:3.8b"
+    primary_model: "gemma4:e2b"
+    fallback_model: "gemma4:e4b"
+    local_model: "gemma4:e2b"
     local_only: true  # Always local — pattern-based, cheap
     temperature: 0.1
     max_tokens: 2048
-    timeout_seconds: 60
+    timeout_seconds: 300
     triggers:
       - "ui"
       - "html"
@@ -560,6 +587,7 @@ execution:
   max_cloud_parallel: 4  # Max cloud model calls in parallel
   max_local_parallel: 1  # Local models run one at a time
   trio_mode_cloud: 3     # Fallback: 3 cloud + 1 local when budget is tight
+  local_num_ctx: 16384   # Context window for local model calls (16K with 64GB RAM)
   retry:
     max_attempts: 3
     initial_backoff_seconds: 1
