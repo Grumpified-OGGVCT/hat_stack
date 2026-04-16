@@ -373,13 +373,18 @@ def generate_markdown_report(consolidated: dict, risk_score: int, verdict: str,
 
 def run_pipeline(diff_text: str, config: dict, requested_hats: list[str] | None = None,
                  context: str = "", output_format: str = "both",
-                 run_id: str | None = None) -> dict:
+                 run_id: str | None = None,
+                 resumed_state: dict | None = None,
+                 checkpoint_dir: str = ".hats/checkpoints") -> dict:
     """Run the full Hats pipeline:
 
     select -> G1 (cost budget) -> sensitive mode detect -> dispatch -> G2/G4 ->
     consolidate + G3 -> CoVE -> G5 -> output
 
     Implements the full Conductor flow with cloud/local concurrency orchestration.
+
+    If resumed_state is provided, skips already-completed/failed/timed-out hats
+    and only runs the pending ones from a checkpoint.
     """
     # Extract changed files from diff for dependency analysis
     changed_files = _extract_changed_files(diff_text)
@@ -427,18 +432,46 @@ def run_pipeline(diff_text: str, config: dict, requested_hats: list[str] | None 
         print(f"Budget gate trimmed to {len(selected)} hats. "
               f"Removed: {', '.join(budget_result['trimmed_hats'])}", file=sys.stderr)
 
-    # Initialize run state
-    if not run_id:
-        run_id = time.strftime("run-%Y%m%d-%H%M%S", time.gmtime())
-    state = create_initial_state(
-        run_id=run_id,
-        trigger_type="manual",
-        diff_content=diff_text[:500],  # Don't store the full diff in state
-        changed_files=changed_files,
-        triggered_hats=selected,
-        sensitive_mode=sensitive_mode,
-    )
-    update_state(state, gate={"gate_id": "G1", "passed": True, "details": budget_result})
+    # Initialize run state (or resume from checkpoint)
+    if resumed_state:
+        state = resumed_state
+        run_id = state["run_id"]
+        # Only run hats that haven't completed/failed/timed out
+        pending = get_pending_hats(state)
+        # Filter selected to only pending hats, preserving order
+        selected = [h for h in selected if h in pending]
+        if not selected:
+            print("Resume: all hats already completed. Nothing to run.", file=sys.stderr)
+            # Re-consolidate existing findings and return
+            existing_reports = state.get("findings", [])
+            consolidated = consolidate_findings(
+                [{"hat_id": f.get("source_hat", "?"), "findings": [f]} for f in existing_reports],
+                timed_out_hats=state.get("timed_out_hats", [])
+            )
+            risk_score, verdict = compute_risk_score(config, consolidated["severity_counts"])
+            markdown = generate_markdown_report(consolidated, risk_score, verdict or "ALLOW",
+                                               state.get("triggered_hats", []), config,
+                                               state.get("sensitive_mode", False))
+            return {
+                "verdict": state.get("verdict", verdict),
+                "risk_score": state.get("risk_score", risk_score),
+                "markdown": markdown,
+                "json_report": {"verdict": state.get("verdict", verdict), "risk_score": risk_score},
+                "consolidated": consolidated,
+            }
+        print(f"Resume: running {len(selected)} pending hats: {', '.join(selected)}", file=sys.stderr)
+    else:
+        if not run_id:
+            run_id = time.strftime("run-%Y%m%d-%H%M%S", time.gmtime())
+        state = create_initial_state(
+            run_id=run_id,
+            trigger_type="manual",
+            diff_content=diff_text[:500],  # Don't store the full diff in state
+            changed_files=changed_files,
+            triggered_hats=selected,
+            sensitive_mode=sensitive_mode,
+        )
+        update_state(state, gate={"gate_id": "G1", "passed": True, "details": budget_result})
 
     # Step 4: Set up concurrency coordinator
     exec_cfg = config.get("execution", {})
@@ -586,6 +619,7 @@ def run_pipeline(diff_text: str, config: dict, requested_hats: list[str] | None 
 
     # Finalize and save state
     finalize_state(state)
+    save_checkpoint(state, checkpoint_dir)
 
     # Step 12: Generate outputs
     markdown = generate_markdown_report(consolidated, risk_score, g5_result["verdict"],
@@ -657,6 +691,14 @@ def main():
         "--run-id", default=None,
         help="Run ID for state tracking"
     )
+    parser.add_argument(
+        "--resume", default=None, metavar="RUN_ID",
+        help="Resume a previous run from its checkpoint. Only pending hats will run."
+    )
+    parser.add_argument(
+        "--checkpoint-dir", default=".hats/checkpoints",
+        help="Directory for checkpoint files (default: .hats/checkpoints)"
+    )
 
     args = parser.parse_args()
 
@@ -690,10 +732,23 @@ def main():
     if args.hats:
         requested_hats = [h.strip() for h in args.hats.split(",")]
 
+    # Resume from checkpoint if requested
+    resumed_state = None
+    if args.resume:
+        resumed_state = load_checkpoint(args.resume, args.checkpoint_dir)
+        if not resumed_state:
+            print(f"No checkpoint found for run_id: {args.resume}", file=sys.stderr)
+            sys.exit(2)
+        # Use the diff from the checkpoint if no new diff provided
+        if args.diff == "-" and resumed_state.get("diff_content"):
+            diff_text = resumed_state["diff_content"]
+        print(f"Resuming run {args.resume} from checkpoint", file=sys.stderr)
+
     # Run pipeline
     result = run_pipeline(diff_text, config, requested_hats=requested_hats,
                           context=args.context, output_format=args.output,
-                          run_id=args.run_id)
+                          run_id=args.run_id, resumed_state=resumed_state,
+                          checkpoint_dir=args.checkpoint_dir)
 
     # Output results
     if args.output in ("markdown", "both"):

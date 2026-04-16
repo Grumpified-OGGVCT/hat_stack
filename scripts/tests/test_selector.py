@@ -13,7 +13,7 @@ TEST_CONFIG = {
         "black": {"name": "Black Hat", "emoji": "⚫", "number": 2, "always_run": True, "triggers": []},
         "blue": {"name": "Blue Hat", "emoji": "🔵", "number": 6, "always_run": True, "triggers": []},
         "purple": {"name": "Purple Hat", "emoji": "🟪", "number": 9, "always_run": True, "triggers": []},
-        "gold": {"name": "Gold Hat", "emoji": "✨", "number": 18, "always_run": True, "triggers": []},
+        "gold": {"name": "Gold Hat", "emoji": "✨", "number": 18, "always_run": True, "run_last": True, "triggers": []},
         "red": {"name": "Red Hat", "emoji": "🔴", "number": 1, "always_run": False,
                 "triggers": ["error", "retry", "catch"]},
         "green": {"name": "Green Hat", "emoji": "🟢", "number": 5, "always_run": False,

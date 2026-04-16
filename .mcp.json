@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "hat_stack": {
+      "command": "node",
+      "args": ["mcp/dist/index.js"],
+      "cwd": ".",
+      "env": {
+        "OLLAMA_LOCAL_URL": "http://localhost:11434"
+      }
+    }
+  }
+}

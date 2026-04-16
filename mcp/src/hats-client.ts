@@ -6,6 +6,7 @@
  */
 
 import { spawn } from "child_process";
+import * as os from "os";
 import * as path from "path";
 import * as fs from "fs";
 import * as yaml from "js-yaml";
@@ -80,7 +81,7 @@ export async function runHatTask(
     "--config", CONFIG_PATH,
     "--task", taskType,
     "--prompt", prompt,
-    "--output", "/tmp/hats-mcp-task-output",
+    "--output", path.join(os.tmpdir(), "hats-mcp-task-output"),
   ];
 
   if (hats && hats.length > 0) {
@@ -90,7 +91,7 @@ export async function runHatTask(
   await spawnPython(args);
 
   // Read the result from the output JSON file
-  const resultPath = "/tmp/hats-mcp-task-output/hats_task_result.json";
+  const resultPath = path.join(os.tmpdir(), "hats-mcp-task-output", "hats_task_result.json");
   if (fs.existsSync(resultPath)) {
     const content = fs.readFileSync(resultPath, "utf-8");
     return JSON.parse(content) as HatTaskResult;
@@ -141,8 +142,8 @@ export async function assembleTeam(
 
   // Detect sensitive content
   const sensitivePatterns = [
-    /\.env/i, /api[_-]?key/i, /secret/i, /credential/i, /auth[_-]?token/i,
-    /password/i, /\.pem/i, /private[_-]?key/i,
+    /\.env/i, /api[_\s-]?key/i, /secret/i, /credential/i, /auth[_\s-]?token/i,
+    /password/i, /\.pem/i, /private[_\s-]?key/i, /hardcoded/i, /pii/i,
   ];
   const isSensitive = sensitivePatterns.some(p =>
     p.test(taskDescription) || (context && p.test(context))

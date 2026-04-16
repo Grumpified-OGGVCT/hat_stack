@@ -1,233 +1,244 @@
-# 🎩 hat_stack
+# Hat Stack
 
-**The Universal Agentic-AI Engineering Stack — Hats Team Specification**
+**The Universal Agentic-AI Engineering Stack -- 18 Specialized Review Agents**
 
-**Version:** 2.0 · **Status:** Production-Ready · **License:** [MIT](LICENSE)
+**Version:** 3.0 · **Status:** Production-Ready · **License:** [MIT](LICENSE)
 
 Language-agnostic · Framework-agnostic · Domain-agnostic
 
 ---
 
-## What Is the Hats Team?
+## What Is Hat Stack?
 
-The Hats Team is a **complete, production-grade Agentic-AI engineering stack** organized around a hat-based role system — a team of **18 specialized micro-agents**, each wearing a metaphorical "hat" that gives it a distinct review lens, set of responsibilities, and decision-making authority.
+Hat Stack is a **local-first agentic review system** that runs 18 specialized AI agents (each wearing a metaphorical "hat") against your code changes. Each hat provides a distinct review lens -- security, performance, accessibility, AI safety, and more -- producing a unified, adjudicated verdict.
 
-The system inspects any code change, pull request, architectural decision, or deployment event through every relevant lens simultaneously, producing a unified, adjudicated verdict that can be fully automated or escalated to human reviewers.
+**Local models, local machine.** Hat Stack runs on your machine using [Ollama](https://ollama.com). No cloud API keys required for the core experience. Cloud models are optional for heavier workloads.
 
-> **Not every hat runs on every PR.** Only **4 hats are always-on** (⚫ Black, 🔵 Blue, 🟪 Purple, ✨ Gold). The remaining 14 are **conditional** — they activate only when the PR's changed files, commit messages, and AST patterns match their trigger conditions. A typical PR activates 4–8 hats, not 18.
-
----
-
-## Key Differentiators
-
-- **18 specialized hats** covering resilience, security, efficiency, integration, evolution, process, cross-feature architecture, innovation, AI safety, DevOps, token optimization, MCP/A2A contract validation, data governance, observability, accessibility, supply-chain integrity, and final convergent QA
-- **20 personas** that embody human-like expertise, enabling each hat to reason with the nuance of a domain specialist rather than a generic LLM
-- **A formal gate system** with five gate types (Quality, Cost, Security, Consistency, Timeliness) that control flow between orchestration phases
-- **Explicit retry, backoff, and circuit-breaker policies** that prevent cascading failures across the agent network
-- **A complete HITL framework** with interrupt-based checkpoints, escalation routing, approval workflows, and audit trails
-- **Supply-chain and dependency-aware analysis** as a first-class concern, not an afterthought
+> **Not every hat runs on every diff.** Only **4 hats are always-on** (Black, Blue, Purple, Gold). The remaining 14 activate when the diff matches their trigger conditions. A typical PR activates 4-8 hats.
 
 ---
 
-## Design Philosophy
+## Quick Start
 
-The system is built on eight core tenets:
+### 1. Install Ollama
 
-| # | Principle | Summary |
-|---|-----------|---------|
-| 1 | **Defense in Depth** | Every finding corroborated by ≥2 hats before escalating. Black Hat may quarantine CRITICAL security findings pending Gold Hat adjudication. |
-| 2 | **Cost Consciousness** | Tiered model selection: cheap/fast for scanning, premium for adjudication. Global token budget gate prevents runaway costs. |
-| 3 | **Graceful Degradation** | No single hat failure blocks the pipeline. Only Gold Hat (CoVE) issues the final hard-block verdict. |
-| 4 | **Stateful Checkpointing** | Orchestration graph persisted at every node boundary. Any interrupted run resumes from last checkpoint. |
-| 5 | **Human Authority** | Advisory by default. HITL reviewers may override any automated recommendation. |
-| 6 | **Universal Applicability** | Language-, framework-, and domain-agnostic. Triggers are keyword- and AST-pattern-based. |
-| 7 | **Interoperability First** | Structured JSON schemas. MCP-compatible interfaces for external tool composition. |
-| 8 | **Continuous Learning** | Hat effectiveness metrics tracked over time and fed back into persona prompt tuning. |
+```bash
+# macOS / Linux
+curl -fsSL https://ollama.com/install.sh | sh
 
----
-
-## Architecture Overview
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│  LAYER 5 — PRESENTATION & GATEWAY                                   │
-│  CLI · Web UI · IDE Extension · CI/CD Trigger · API Endpoint        │
-├─────────────────────────────────────────────────────────────────────┤
-│  LAYER 4 — ORCHESTRATION (The Conductor)                            │
-│  Hat Selector · Gate Engine · Retry Controller · State Manager       │
-│  Consolidator · CoVE Final Adjudicator                               │
-├─────────────────────────────────────────────────────────────────────┤
-│  LAYER 3 — HAT AGENTS (Micro-Agents)                                │
-│  18 specialized hat nodes, each with dedicated persona + tools       │
-├─────────────────────────────────────────────────────────────────────┤
-│  LAYER 2 — PROTOCOL LAYER                                           │
-│  MCP (Tool Integration) · A2A (Agent-to-Agent) · AG-UI (Frontend)   │
-├─────────────────────────────────────────────────────────────────────┤
-│  LAYER 1 — INFRASTRUCTURE                                           │
-│  LLM Providers · Vector Stores · Key-Value Stores · Message Queues  │
-│  Observability (OTel) · Secret Management · Cost Tracking           │
-└─────────────────────────────────────────────────────────────────────┘
+# Windows -- download from https://ollama.com/download
 ```
 
+### 2. Pull a model
+
+```bash
+ollama pull gemma4:e2b    # 7.2GB, fast, good for most hats
+```
+
+### 3. Clone and run
+
+```bash
+git clone https://github.com/Grumpified-OGGVCT/hat_stack.git
+cd hat_stack
+pip install -r scripts/requirements.txt
+
+# Review a diff file
+python scripts/hats_runner.py --diff my-changes.patch
+
+# Review from stdin
+git diff main | python scripts/hats_runner.py --diff -
+
+# Specify hats
+python scripts/hats_runner.py --diff my-changes.patch --hats black,blue,purple
+```
+
+### 4. Done
+
+You'll get a verdict: **ALLOW**, **ESCALATE**, or **QUARANTINE** with a full report.
+
 ---
 
-## Merge Decision Verdicts
+## Local Model Pool
+
+Hat Stack uses these local Ollama models by default (no cloud needed):
+
+| Model | Size | Effective Params | Role |
+|-------|------|------------------|------|
+| `gemma4:e2b` | 7.2GB | 2.3B | Fast scanning: White, Blue, Silver, Teal |
+| `gemma4:e4b` | 9.6GB | 4.5B | Security analysis: Black, Purple (local mode) |
+| `qwen3.5:9b` | 6.1GB | 9B | Deep reasoning: Red, Brown (local mode) |
+
+Pull all three for full local coverage:
+
+```bash
+ollama pull gemma4:e2b gemma4:e4b qwen3.5:9b
+```
+
+---
+
+## Cloud Models (Optional)
+
+For heavier workloads, Hat Stack supports Ollama Cloud models. Set `OLLAMA_API_KEY` to enable:
+
+```bash
+export OLLAMA_API_KEY="your-key-from-ollama-com"
+# Get a key at: https://ollama.com/settings/keys
+```
+
+Cloud models (Tier 1-4) include: glm-5.1, kimi-k2.5, deepseek-v3.2, devstral-2, minimax-m2.7, nemotron-3-super, qwen3-coder, and more. See [`scripts/hat_configs.yml`](scripts/hat_configs.yml) for the full pool.
+
+---
+
+## MCP Server -- Use from Claude Code
+
+Hat Stack exposes an MCP server so any MCP-compatible agent can call it:
+
+```json
+// In your project's .mcp.json or Claude Code settings
+{
+  "mcpServers": {
+    "hat_stack": {
+      "command": "node",
+      "args": ["path/to/hat_stack/mcp/dist/index.js"]
+    }
+  }
+}
+```
+
+**Available tools:**
+
+| Tool | Description |
+|------|-------------|
+| `hats_review` | Run a review on a diff. Returns verdict, risk score, findings. |
+| `hats_task` | Run a task (generate_code, analyze, plan, test, etc.) |
+| `hats_list_models` | List available models and their hat assignments |
+| `hats_check_status` | Check pipeline status for a run |
+| `hats_get_config` | Get current hat_configs.yml |
+| `hats_assemble_team` | Assemble a custom team for a specific task. Returns optimal hat+model lineup with execution plan. |
+
+### hats_assemble_team Example
+
+Tell it what you're working on and get the right team:
+
+```
+"I'm reviewing a PR that touches auth and database migrations"
+```
+
+Returns:
+```
+Team: Black [local: gemma4:e4b -- auth detected], Purple [local: gemma4:e4b -- PII detected],
+      Indigo [cloud: devstral-2:123b-cloud -- multi-file], Blue [local: gemma4:e2b]
+Execution: cloud group runs in parallel with local queue
+Budget: ~8,500 tokens estimated
+```
+
+---
+
+## Security Mode
+
+When a diff contains credentials, API keys, or PII patterns, Hat Stack automatically switches dual-mode hats (Black, Purple, Brown) to **local models only** -- your sensitive code never leaves your machine.
+
+This is automatic. No configuration needed.
+
+---
+
+## Task Mode -- Tell It to DO Things
+
+Beyond review, Hat Stack can generate code, write docs, create plans, and build tests:
+
+```bash
+# Generate code
+python scripts/hats_task_runner.py --task generate_code \
+  --prompt "Build a FastAPI auth module with JWT"
+
+# Write documentation
+python scripts/hats_task_runner.py --task generate_docs \
+  --prompt "Write API docs for /users endpoints"
+
+# Create a plan
+python scripts/hats_task_runner.py --task plan \
+  --prompt "Plan migration from REST to GraphQL"
+
+# Generate tests
+python scripts/hats_task_runner.py --task test \
+  --prompt "Write unit tests for auth.py"
+
+# Deep analysis
+python scripts/hats_task_runner.py --task analyze \
+  --prompt "Security audit of payment processing"
+```
+
+---
+
+## The 18 Hats
+
+| # | Hat | Run Mode | Focus |
+|---|-----|----------|-------|
+| 1 | Red | Conditional | Failure & Resilience |
+| 2 | Black | **Always** | Security & Exploits |
+| 3 | White | Conditional | Efficiency & Resources |
+| 4 | Yellow | Conditional | Synergies & Integration |
+| 5 | Green | Conditional | Evolution & Extensibility |
+| 6 | Blue | **Always** | Process & Specification |
+| 7 | Indigo | Conditional | Cross-Feature Architecture |
+| 8 | Cyan | Conditional | Innovation & Feasibility |
+| 9 | Purple | **Always** | AI Safety & Alignment |
+| 10 | Orange | Conditional | DevOps & Automation |
+| 11 | Silver | Conditional | Context & Token Optimization |
+| 12 | Azure | Conditional | MCP & Protocol Integration |
+| 13 | Brown | Conditional | Data Governance & Privacy |
+| 14 | Gray | Conditional | Observability & Reliability |
+| 15 | Teal | Conditional | Accessibility & Inclusion |
+| 16 | Steel | Conditional | Supply Chain & Dependencies |
+| 17 | Chartreuse | Conditional | Testing & Evaluation |
+| 18 | Gold | **Always (Last)** | CoVE Final QA |
+
+Full specifications: [`CATALOG.md`](CATALOG.md) · Individual hat docs: [`hats/`](hats/)
+
+---
+
+## Verdicts
 
 | Verdict | Meaning | Condition |
 |---------|---------|-----------|
-| **`ALLOW`** | Safe to merge | No CRITICAL findings; composite risk score ≤ 20 |
-| **`ESCALATE`** | Requires human review | One or more HIGH findings; risk score 21–60; or AI Act high-risk classification |
-| **`QUARANTINE`** | Temporary hold — cannot merge pending adjudication | Any CRITICAL finding triggers a quarantine hold pending Gold Hat adjudication; risk score > 60 |
+| **ALLOW** | Safe to merge | No CRITICAL findings; risk score <= 20 |
+| **ESCALATE** | Requires human review | HIGH findings; risk score 21-60 |
+| **QUARANTINE** | Cannot merge pending adjudication | CRITICAL finding; risk score > 60 |
 
 ---
 
-## The 18 Hats — Complete Registry
+## Resume from Checkpoint
 
-> Full table with trigger conditions: [`CATALOG.md`](CATALOG.md) · Full technical specification: [`SPEC.md`](SPEC.md)
-
-| # | Hat | Run Mode | Spec |
-|---|-----|----------|------|
-| 1 | 🔴 Red Hat — Failure & Resilience | Conditional | [`01_red_hat.md`](hats/01_red_hat.md) |
-| 2 | ⚫ Black Hat — Security & Exploits | **Always** | [`02_black_hat.md`](hats/02_black_hat.md) |
-| 3 | ⚪ White Hat — Efficiency & Resources | Conditional | [`03_white_hat.md`](hats/03_white_hat.md) |
-| 4 | 🟡 Yellow Hat — Synergies & Integration | Conditional | [`04_yellow_hat.md`](hats/04_yellow_hat.md) |
-| 5 | 🟢 Green Hat — Evolution & Extensibility | Conditional | [`05_green_hat.md`](hats/05_green_hat.md) |
-| 6 | 🔵 Blue Hat — Process & Specification | **Always** | [`06_blue_hat.md`](hats/06_blue_hat.md) |
-| 7 | 🟣 Indigo Hat — Cross-Feature Architecture | Conditional | [`07_indigo_hat.md`](hats/07_indigo_hat.md) |
-| 8 | 🩵 Cyan Hat — Innovation & Feasibility | Conditional | [`08_cyan_hat.md`](hats/08_cyan_hat.md) |
-| 9 | 🟪 Purple Hat — AI Safety & Alignment | **Always** | [`09_purple_hat.md`](hats/09_purple_hat.md) |
-| 10 | 🟠 Orange Hat — DevOps & Automation | Conditional | [`10_orange_hat.md`](hats/10_orange_hat.md) |
-| 11 | 🪨 Silver Hat — Context & Token Optimization | Conditional | [`11_silver_hat.md`](hats/11_silver_hat.md) |
-| 12 | 💎 Azure Hat — MCP & Protocol Integration | Conditional | [`12_azure_hat.md`](hats/12_azure_hat.md) |
-| 13 | 🟤 Brown Hat — Data Governance & Privacy | Conditional | [`13_brown_hat.md`](hats/13_brown_hat.md) |
-| 14 | ⚙️ Gray Hat — Observability & Reliability | Conditional | [`14_gray_hat.md`](hats/14_gray_hat.md) |
-| 15 | ♿ Teal Hat — Accessibility & Inclusion | Conditional | [`15_teal_hat.md`](hats/15_teal_hat.md) |
-| 16 | 🔗 Steel Hat — Supply Chain & Dependencies | Conditional | [`16_steel_hat.md`](hats/16_steel_hat.md) |
-| 17 | 🧪 Chartreuse Hat — Testing & Evaluation | Conditional | [`17_chartreuse_hat.md`](hats/17_chartreuse_hat.md) |
-| 18 | ✨ Gold Hat — CoVE Final QA | **Always (Last)** | [`18_gold_hat.md`](hats/18_gold_hat.md) |
-
----
-
-## Phased Adoption Path
-
-You don't need to adopt all 18 hats at once. The recommended path:
-
-| Phase | Hats | Coverage |
-|-------|------|----------|
-| **Week 1** | ⚫ Black, 🔵 Blue, 🟪 Purple | Mandatory baseline — security, process, AI safety |
-| **Week 2** | + 🔴 Red, ⚪ White, 🔗 Steel | Add resilience, efficiency, supply-chain |
-| **Week 3** | + 🟠 Orange, 🧪 Chartreuse, ⚙️ Gray | Add DevOps, testing, observability |
-| **Week 4+** | Remaining hats as needed | Full catalog as your team's confidence grows |
-
----
-
-## 🚀 Use It — GitHub Actions Integration
-
-Hat Stack runs **in GitHub** as a tool your other projects can call. It does two things:
-
-1. **Review** — Analyze PRs and diffs through 18 expert lenses
-2. **Task** — Actually *do work*: generate code, write docs, create plans, build tests
-
-### Quick Start: Fork & Go
-
-1. **Fork** this repo
-2. Add `OLLAMA_API_KEY` as a **Repository Secret** in your fork
-3. Done — your fork's workflows are live
-
-> **Your keys stay yours.** GitHub Secrets are encrypted, never in code, and never transferred to forks. See [`FORK_SETUP.md`](FORK_SETUP.md) for the full guide.
-
-### Hook Up Your Other Projects (Review Mode)
-
-**Option A — Reusable Workflow** (recommended):
-```yaml
-# In your other repo: .github/workflows/hats.yml
-name: "🎩 Hats Review"
-on:
-  pull_request:
-    types: [opened, synchronize, reopened]
-
-jobs:
-  get-diff:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Generate diff
-        id: diff
-        run: |
-          git diff origin/${{ github.base_ref }}...HEAD > /tmp/pr.diff
-      - uses: actions/upload-artifact@v4
-        with:
-          name: pr-diff
-          path: /tmp/pr.diff
-
-  hats-review:
-    needs: get-diff
-    uses: YOUR_USERNAME/hat_stack/.github/workflows/hats-review.yml@main
-    with:
-      diff_artifact: pr-diff
-    secrets:
-      ollama_api_key: ${{ secrets.OLLAMA_API_KEY }}
-```
-
-**Option B — Composite Action**:
-```yaml
-- uses: YOUR_USERNAME/hat_stack/.github/actions/run-hats@main
-  with:
-    diff_file: /tmp/pr.diff
-  env:
-    OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
-```
-
-### 🤖 Task Mode — Tell It to DO Things (via `hat` CLI or GitHub CLI)
-
-Install the `hat` CLI, then your local agent (Copilot, etc.) can dispatch real work:
+Interrupted runs can be resumed:
 
 ```bash
-# Install (one time)
-cp scripts/hat /usr/local/bin/hat   # or add scripts/ to PATH
-export HAT_STACK_REPO="YOUR_USERNAME/hat_stack"
-
-# Generate code
-hat task generate_code "Build a FastAPI auth module with JWT" \
-  --repo myorg/app --pr 42 --category code --genre api --project auth-service
-
-# Write documentation
-hat task generate_docs "Write API docs for /users endpoints" --repo myorg/app --issue 10
-
-# Create a plan
-hat task plan "Plan migration from REST to GraphQL" --repo myorg/app
-
-# Generate tests
-hat task test "Write unit tests for auth.py" --repo myorg/app --pr 88
-
-# Deep analysis
-hat task analyze "Security audit of payment processing" --repo myorg/payments
-
-# Review a diff
-git diff main | hat review - --repo myorg/app --pr 123
+# Original run saved to .hats/checkpoints/run-20260415-120000.json
+python scripts/hats_runner.py --resume run-20260415-120000 --diff my-changes.patch
 ```
 
-Task runs now support a structured playground sandbox on the runner:
+Only pending (not yet completed) hats will run.
 
-- Workflow default workspace root: `/tmp/hats-playground`
-- Layout: `<workspace>/<category>/<genre>/<project>/<run-id>/`
-- Contents: generated files, `HATS_TASK_SUMMARY.md`, `hats_task_result.json`, `PLAYGROUND_MANIFEST.json`
-- Persistence: both the run output and the full playground tree are uploaded as workflow artifacts
-- Resilience: if the first Ollama model fails, task mode retries comparable configured fallback models automatically
+---
 
-If no workspace root is provided outside the workflow, task mode falls back to a unique temporary output directory under `/tmp`.
+## GitHub Actions (Optional)
 
-Or dispatch directly via `gh` CLI (what your Copilot agent would call):
+Hat Stack also runs as GitHub Actions for CI/CD integration. See:
 
-```bash
-gh api repos/YOUR_USERNAME/hat_stack/dispatches \
-  -f event_type=run-task \
-  -f client_payload='{"task":"generate_code","prompt":"Build auth module","callback_repo":"myorg/app","callback_pr":"42"}'
+- [`FORK_SETUP.md`](FORK_SETUP.md) -- Fork and setup guide for GitHub Actions
+- [`.github/workflows/`](.github/workflows/) -- Reusable workflows, dispatch handler, task runner
+- `OLLAMA_API_KEY` -- Required as a Repository Secret for cloud models in CI
+
+---
+
+## Architecture
+
 ```
-
-→ Full integration guide: [`FORK_SETUP.md`](FORK_SETUP.md)
+Layer 5: CLI / MCP Server / IDE Extension / CI/CD Trigger
+Layer 4: Conductor -- Hat Selector, Gate Engine, Retry, State Manager, Consolidator, CoVE
+Layer 3: 18 Hat Agents -- each with dedicated persona + model
+Layer 2: MCP (Tool Integration) / A2A (Agent-to-Agent)
+Layer 1: Ollama (Local + Cloud) / Vector Stores / Key-Value Stores
+```
 
 ---
 
@@ -235,14 +246,12 @@ gh api repos/YOUR_USERNAME/hat_stack/dispatches \
 
 | Document | Description |
 |----------|-------------|
-| [`README.md`](README.md) | This file — project overview, architecture, and quick reference |
-| [`FORK_SETUP.md`](FORK_SETUP.md) | **Fork & Setup Guide** — get your own working Hat Stack in 5 minutes, secret management, integration patterns |
-| [`SPEC.md`](SPEC.md) | **Primary specification** — orchestration, gates, retry policies, HITL framework, CI/CD integration, security, deployment guide, and all appendices |
-| [`CATALOG.md`](CATALOG.md) | **Master Hat Registry** — design philosophy, full hat table with triggers, severity grading, and composite risk score |
-| [`hats/01_red_hat.md`](hats/01_red_hat.md) – [`hats/18_gold_hat.md`](hats/18_gold_hat.md) | Individual hat specifications with detailed assignments, severity grading, tools, and token budgets |
-| [`hats/AGENTIC_AI_HATS_TEAM_STACK.md`](hats/AGENTIC_AI_HATS_TEAM_STACK.md) | **Complete Specification** (standalone) — the full 16-section specification including inline hat details, personas, orchestration, gates, and appendices |
-| [`hats/HATS_TEAM_IMPLEMENTATION_GUIDE.md`](hats/HATS_TEAM_IMPLEMENTATION_GUIDE.md) | **Implementation Guide** — running the Hats Team on Ollama Cloud + n8n: LLM backend mapping, cost-optimized model selection, n8n workflow architecture, security box, self-improvement pipeline, and step-by-step deployment |
-| [`hats/HATS_TEAM_CONCERNS_DISCUSSION.md`](hats/HATS_TEAM_CONCERNS_DISCUSSION.md) | **Addressing Concerns** — honest engagement with 17 real-world concerns including over-engineering, cost, latency, false positives, non-determinism, and "show me working code" |
+| [`FORK_SETUP.md`](FORK_SETUP.md) | GitHub Actions fork and setup guide |
+| [`SPEC.md`](SPEC.md) | Primary specification -- orchestration, gates, retry, HITL, CI/CD |
+| [`CATALOG.md`](CATALOG.md) | Master Hat Registry -- triggers, severity grading, risk scores |
+| [`hats/`](hats/) | Individual hat specifications |
+| [`scripts/hat_configs.yml`](scripts/hat_configs.yml) | Model pool and hat-to-model configuration |
+| [`.env.example`](.env.example) | Environment variable template |
 
 ---
 
@@ -250,39 +259,25 @@ gh api repos/YOUR_USERNAME/hat_stack/dispatches \
 
 ```
 hat_stack/
-├── README.md                                  ← This file — project overview & navigation
-├── FORK_SETUP.md                              ← Fork & setup guide (start here for your own instance)
-├── .env.example                               ← Environment template (copy to .env for local use)
-├── CATALOG.md                                 ← Master Hat Registry (full table + design philosophy)
-├── SPEC.md                                    ← Primary specification (16 sections + appendices)
-├── LICENSE                                    ← MIT License
-├── .github/
-│   ├── workflows/
-│   │   ├── hats-review.yml                    ← Reusable workflow (other repos call this for reviews)
-│   │   ├── hats-dispatch.yml                  ← Dispatch handler (API-triggered reviews)
-│   │   ├── hats-task.yml                      ← Task execution (generate code, docs, plans, etc.)
-│   │   └── hats-self-review.yml               ← Self-review (reviews PRs to this repo)
-│   └── actions/
-│       └── run-hats/
-│           └── action.yml                     ← Composite action (direct step in any workflow)
-├── scripts/
-│   ├── hat                                    ← CLI wrapper — dispatch tasks from terminal or agents
-│   ├── hats_runner.py                         ← Review orchestrator (Conductor + all hat logic)
-│   ├── hats_task_runner.py                    ← Task orchestrator (generate, refactor, plan, etc.)
-│   ├── hat_configs.yml                        ← Hat-to-model mapping & configuration
-│   └── requirements.txt                       ← Python dependencies
-└── hats/
-    ├── 01_red_hat.md                          ← Individual hat specifications
-    ├── 02_black_hat.md
-    ├── ...
-    ├── 18_gold_hat.md
-    ├── AGENTIC_AI_HATS_TEAM_STACK.md          ← Complete standalone specification
-    ├── HATS_TEAM_IMPLEMENTATION_GUIDE.md      ← Implementation guide: Ollama Cloud + n8n
-    └── HATS_TEAM_CONCERNS_DISCUSSION.md       ← Addressing concerns & FAQ
+  scripts/
+    hats_runner.py           Review orchestrator (Conductor)
+    hats_task_runner.py       Task orchestrator (generate, refactor, plan, etc.)
+    hats_common.py            Shared library: call_ollama, retry, circuit breaker, concurrency
+    hat_selector.py           Hat selection engine (keyword + AST + dependency)
+    gates.py                  Gate engine (cost, security, consistency, timeout, decision)
+    consolidator.py           Finding deduplication and conflict detection
+    state.py                  Run state persistence and checkpoint resume
+    hat_configs.yml           Model pool and hat configuration
+    tests/                    Unit and integration tests
+  mcp/
+    src/                      MCP server source (TypeScript)
+    dist/                     Compiled MCP server
+  hats/                       Individual hat specification documents
+  .github/workflows/          GitHub Actions workflows (optional CI/CD mode)
 ```
 
 ---
 
 ## License
 
-MIT — See [LICENSE](LICENSE).
+MIT -- See [LICENSE](LICENSE).

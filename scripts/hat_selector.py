@@ -9,6 +9,8 @@ Implements SPEC §6.2:
   4. Mandatory baseline (Black, Blue, Purple always-on)
 """
 
+import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -179,15 +181,18 @@ def select_hats(
     always_hats = {hat_id for hat_id, hat_def in hats_cfg.items() if hat_def.get("always_run")}
     selected.update(always_hats)
 
+    # Identify run_last hats (e.g., Gold/CoVE) from config
+    run_last_hats = {hat_id for hat_id, hat_def in hats_cfg.items() if hat_def.get("run_last")}
+
     # If caller requested specific hats, only include those (plus always-on)
     if requested_hats is not None:
         for hat_id in requested_hats:
             if hat_id in hats_cfg:
                 selected.add(hat_id)
-        # Gold/CoVE must always run last
-        if "gold" in selected:
-            selected.discard("gold")
-        ordered = _order_hats(selected - {"gold"}, hats_cfg) + ["gold"]
+        # run_last hats must always run last
+        last = selected & run_last_hats
+        selected -= last
+        ordered = _order_hats(selected, hats_cfg) + sorted(last)
         return ordered
 
     # Layer 1: Keyword heuristics
@@ -235,11 +240,12 @@ def select_hats(
     _ast_hats = _detect_ast_patterns(diff_text)
     selected.update(_ast_hats)
 
-    # Ensure Gold/CoVE is last
-    selected.discard("gold")  # Will be added at end
+    # Ensure run_last hats (e.g., Gold/CoVE) are last
+    last = selected & run_last_hats
+    selected -= last
 
     # Order the selected hats
-    ordered = _order_hats(selected, hats_cfg) + ["gold"]
+    ordered = _order_hats(selected, hats_cfg) + sorted(last)
 
     return ordered
 
@@ -255,15 +261,69 @@ def _extract_changed_files(diff_text: str) -> list[str]:
     return files
 
 
+# Semgrep rule categories → hat IDs
+_SEMGREP_RULE_HAT_MAP = {
+    "security": {"black", "purple"},
+    "secrets": {"black", "brown"},
+    "sql": {"black", "white"},
+    "xss": {"black"},
+    "injection": {"black"},
+    "crypto": {"black"},
+    "correctness": {"red", "blue"},
+    "performance": {"white"},
+    "accessibility": {"teal"},
+    "best-practice": {"blue", "green"},
+    "design": {"green"},
+    "test": {"chartreuse"},
+}
+
+
 def _detect_ast_patterns(diff_text: str) -> set[str]:
     """Layer 2: AST pattern detection using Semgrep (optional).
 
-    Returns a set of hat IDs to activate based on AST patterns.
-    Currently a placeholder — returns empty set if Semgrep is not available.
+    Runs `semgrep --config auto` on the diff if semgrep is installed.
+    Maps rule categories to hat IDs. Falls back gracefully if semgrep
+    is not available or times out.
     """
-    # Semgrep integration would go here. For now, we rely on keyword
-    # and dependency heuristics which cover most cases.
-    return set()
+    import subprocess
+    import shutil
+
+    if not shutil.which("semgrep"):
+        return set()
+
+    activated_hats = set()
+    try:
+        # Write diff to a temp file for semgrep to scan
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".patch", delete=False,
+                                         encoding="utf-8") as tmp:
+            tmp.write(diff_text)
+            tmp_path = tmp.name
+
+        result = subprocess.run(
+            ["semgrep", "--config", "auto", "--json", "--quiet", tmp_path],
+            capture_output=True, text=True, timeout=30,
+        )
+        if result.returncode == 0 and result.stdout:
+            data = json.loads(result.stdout)
+            for finding in data.get("results", []):
+                check_id = finding.get("check_id", "")
+                # Extract rule category from check_id (e.g., "security.sql-injection")
+                category = check_id.split(".")[0] if "." in check_id else ""
+                if category in _SEMGREP_RULE_HAT_MAP:
+                    activated_hats.update(_SEMGREP_RULE_HAT_MAP[category])
+
+        # Clean up temp file
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, FileNotFoundError, OSError):
+        # Semgrep failed — not blocking, return what we have
+        pass
+
+    return activated_hats
 
 
 def _order_hats(hat_ids: set[str], hats_cfg: dict) -> list[str]:
