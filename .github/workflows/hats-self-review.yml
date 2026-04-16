@@ -117,6 +117,45 @@ jobs:
               });
             }
 
+      - name: Create issue with findings
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const verdict = '${{ steps.hats.outputs.verdict }}';
+            const riskScore = '${{ steps.hats.outputs.risk_score }}';
+
+            // Build issue title based on verdict
+            let title, labels;
+            if (verdict === 'QUARANTINE') {
+              title = `🚫 QUARANTINE — Hats Review found critical issues (risk: ${riskScore})`;
+              labels = ['quarantine', 'hats-review'];
+            } else if (verdict === 'ESCALATE') {
+              title = `⚠️ ESCALATE — Hats Review requires human attention (risk: ${riskScore})`;
+              labels = ['escalate', 'hats-review'];
+            } else {
+              title = `✅ ALLOW — Hats Review passed (risk: ${riskScore})`;
+              labels = ['hats-review'];
+            }
+
+            // Build issue body from report
+            let body = `## 🎩 Hats Self-Review Report\n\n**PR:** #${context.issue.number}\n**Verdict:** ${verdict}\n**Risk Score:** ${riskScore}\n\n---\n\n`;
+            try {
+              body += fs.readFileSync('/tmp/hats-report.md', 'utf8');
+            } catch (e) {
+              body += 'No detailed report generated.';
+            }
+
+            // Create the issue
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: title,
+              body: body,
+              labels: labels,
+            });
+
       - name: Upload reports
         if: always()
         uses: actions/upload-artifact@v4

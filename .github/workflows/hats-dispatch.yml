@@ -205,6 +205,55 @@ jobs:
 
           echo "✅ Results posted to $CALLBACK_REPO#$CALLBACK_ISSUE"
 
+      - name: Create issue with findings
+        if: steps.payload.outputs.callback_repo != ''
+        env:
+          GH_TOKEN: ${{ secrets.HAT_STACK_CALLBACK_TOKEN }}
+        shell: bash
+        run: |
+          CALLBACK_REPO="${{ steps.payload.outputs.callback_repo }}"
+          VERDICT="${{ steps.run.outputs.verdict }}"
+          RISK_SCORE="${{ steps.run.outputs.risk_score }}"
+
+          if [ -z "$GH_TOKEN" ]; then
+            echo "⚠️ HAT_STACK_CALLBACK_TOKEN not set — cannot create issue in $CALLBACK_REPO"
+            exit 0
+          fi
+
+          # Build issue title
+          if [ "$VERDICT" = "QUARANTINE" ]; then
+            TITLE="🚫 QUARANTINE — Hats Review found critical issues (risk: $RISK_SCORE)"
+            LABELS="quarantine,hats-review"
+          elif [ "$VERDICT" = "ESCALATE" ]; then
+            TITLE="⚠️ ESCALATE — Hats Review requires human attention (risk: $RISK_SCORE)"
+            LABELS="escalate,hats-review"
+          else
+            TITLE="✅ ALLOW — Hats Review passed (risk: $RISK_SCORE)"
+            LABELS="hats-review"
+          fi
+
+          # Build issue body from report or fallback
+          if [ -f /tmp/hats-report.md ]; then
+            REPORT_BODY=$(cat /tmp/hats-report.md)
+          else
+            REPORT_BODY="🎩 Hats Review completed. Verdict: $VERDICT (Score: $RISK_SCORE)"
+          fi
+
+          # Create the issue via GitHub API
+          ISSUE_DATA=$(python3 -c "
+          import json, sys
+          body = sys.stdin.read()
+          print(json.dumps({'title': '$TITLE', 'body': body, 'labels': $LABELS.split(',') if '$LABELS' else []}))
+          " <<< "$REPORT_BODY")
+
+          ISSUE_NUMBER=$(curl -s -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$CALLBACK_REPO/issues" \
+            -d "$ISSUE_DATA" | python3 -c "import json,sys; print(json.load(sys.stdin).get('number','failed'))")
+
+          echo "✅ Created issue $CALLBACK_REPO#$ISSUE_NUMBER"
+
       - name: Upload reports
         if: always()
         uses: actions/upload-artifact@v4
