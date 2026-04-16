@@ -623,7 +623,7 @@ def main():
         description="Hats Team Runner -- run the Hats review pipeline on a diff"
     )
     parser.add_argument(
-        "--diff", required=True,
+        "--diff", required=False,
         help="Path to diff file, or '-' to read from stdin"
     )
     parser.add_argument(
@@ -667,10 +667,80 @@ def main():
         "--quiet", action="store_true",
         help="Quiet mode: only print verdict, risk score, and report path. Useful for CI pipelines."
     )
+    parser.add_argument(
+        "--benchmarks", action="store_true",
+        help="Show benchmark summary from accumulated run data and exit."
+    )
 
     args = parser.parse_args()
 
+    # Show benchmarks and exit (no pipeline run needed)
+    if args.benchmarks:
+        log_path = Path(args.checkpoint_dir).parent / "run_log.jsonl"
+        if not log_path.exists():
+            print("No run data found. Run some reviews first to build benchmark data.")
+            print(f"  Expected: {log_path}")
+            sys.exit(0)
+        runs = []
+        with open(log_path, "r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if line:
+                    try:
+                        runs.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        pass
+        if not runs:
+            print("No valid run data found.")
+            sys.exit(0)
+
+        # Bucket by diff size
+        buckets = {"small": [], "medium": [], "large": []}
+        for r in runs:
+            dl = r.get("diff_lines", 0)
+            if dl <= 200:
+                buckets["small"].append(r)
+            elif dl <= 2000:
+                buckets["medium"].append(r)
+            else:
+                buckets["large"].append(r)
+
+        print("\nHat Stack Benchmarks (from accumulated run data)\n")
+        print(f"{'Diff Size':<12} {'Runs':>5} {'Avg Latency':>12} {'Avg Hats':>9} {'Avg Tokens':>12} {'Avg Risk':>9}")
+        print("-" * 65)
+        for label, bucket in [("<=200 lines", buckets["small"]),
+                              ("200-2K lines", buckets["medium"]),
+                              (">2K lines", buckets["large"])]:
+            if not bucket:
+                print(f"{label:<12} {'--':>5} {'--':>12} {'--':>9} {'--':>12} {'--':>9}")
+                continue
+            n = len(bucket)
+            avg_lat = sum(r.get("total_latency_s", 0) for r in bucket) / n
+            avg_hats = sum(r.get("hats_executed", 0) for r in bucket) / n
+            avg_tok = sum(r.get("total_tokens_input", 0) + r.get("total_tokens_output", 0)
+                         for r in bucket) / n
+            avg_risk = sum(r.get("risk_score", 0) for r in bucket) / n
+            print(f"{label:<12} {n:>5} {avg_lat:>10.1f}s {avg_hats:>9.1f} {avg_tok:>10.0f} {avg_risk:>9.1f}")
+
+        # Per-hat averages
+        all_hat_timings: dict[str, list[float]] = {}
+        for r in runs:
+            for hat_id, timing in r.get("hat_timings", {}).items():
+                all_hat_timings.setdefault(hat_id, []).append(timing.get("latency_s", 0))
+        if all_hat_timings:
+            print(f"\nPer-Hat Averages ({len(runs)} total runs)\n")
+            print(f"{'Hat':<12} {'Runs':>5} {'Avg Latency':>12}")
+            print("-" * 32)
+            for hat_id in sorted(all_hat_timings):
+                times = all_hat_timings[hat_id]
+                avg = sum(times) / len(times)
+                print(f"{hat_id:<12} {len(times):>5} {avg:>10.1f}s")
+
+        sys.exit(0)
+
     # Load config first (needed for preflight to know if cloud models are required)
+    if not args.diff:
+        parser.error("--diff is required (or use --benchmarks to view run data)")
     config = load_config(args.config)
 
     # Preflight health check
@@ -753,9 +823,64 @@ def main():
             fh.write(f"risk_score={result['risk_score']}\n")
             fh.write(f"hats_executed={result['consolidated'].get('hats_executed', 0)}\n")
 
+    # Log run metrics for benchmarking
+    log_run_metrics(result, diff_text, config, requested_hats, args.checkpoint_dir)
+
     # Exit code: 0 for ALLOW, 1 for ESCALATE/QUARANTINE/BLOCKED
     if result["verdict"] != "ALLOW":
         sys.exit(1)
+
+
+def log_run_metrics(result: dict, diff_text: str, config: dict,
+                    requested_hats: list | None, checkpoint_dir: str):
+    """Append run metrics to .hats/run_log.jsonl for benchmarking.
+
+    Each run appends a single line with timing, diff size, and model info.
+    Over time this builds up data for the benchmark table in the README.
+    """
+    log_dir = Path(checkpoint_dir).parent
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / "run_log.jsonl"
+
+    diff_lines = len(diff_text.splitlines())
+    diff_tokens = len(diff_text) // 4
+    hats = result.get("consolidated", {}).get("hat_summaries", [])
+    models_used = set()
+    for hs in hats:
+        if hs.get("model"):
+            models_used.add(hs["model"])
+
+    entry = {
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "verdict": result["verdict"],
+        "risk_score": result["risk_score"],
+        "diff_lines": diff_lines,
+        "diff_tokens": diff_tokens,
+        "hats_executed": result.get("consolidated", {}).get("hats_executed", 0),
+        "hats_failed": result.get("consolidated", {}).get("hats_failed", 0),
+        "total_tokens_input": result.get("consolidated", {}).get("total_tokens", {}).get("input", 0),
+        "total_tokens_output": result.get("consolidated", {}).get("total_tokens", {}).get("output", 0),
+        "models_used": sorted(models_used),
+        "local_only": bool(config.get("local_only", {}).get("enabled", False)),
+        "requested_hats": requested_hats,
+    }
+
+    # Add per-hat timing
+    hat_timings = {}
+    for hs in hats:
+        hat_timings[hs.get("hat", "unknown")] = {
+            "latency_s": hs.get("latency_s", 0),
+            "findings": hs.get("findings_count", 0),
+            "model": hs.get("model", ""),
+        }
+    entry["hat_timings"] = hat_timings
+
+    # Compute total wall time from per-hat latencies
+    total_latency = sum(hs.get("latency_s", 0) for hs in hats)
+    entry["total_latency_s"] = round(total_latency, 1)
+
+    with open(log_path, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(entry) + "\n")
 
 
 if __name__ == "__main__":

@@ -439,6 +439,16 @@ Full specifications: [`CATALOG.md`](CATALOG.md) · Individual hat docs: [`hats/`
 | Real-time PR feedback on massive PRs (hundreds of files) | Per-hat timeouts are 60-300s; consider splitting large PRs or raising `timeout_multiplier` |
 | Repos with no diff semantics (binary assets, images) | Conditional hats won't activate on binary files; only the 4 always-on hats run |
 
+### Benchmarks
+
+Every run automatically logs timing data to `.hats/run_log.jsonl`. View accumulated benchmarks:
+
+```bash
+python scripts/hats_runner.py --benchmarks
+```
+
+This builds over time — the more you run Hat Stack, the more accurate the averages become. The table buckets diffs by size (<=200 lines, 200-2K, >2K) and shows average latency, hat count, token usage, and risk score per bucket.
+
 ---
 
 ## Resume from Checkpoint
