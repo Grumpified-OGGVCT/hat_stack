@@ -349,7 +349,7 @@ jobs:
 
       - name: Upload task output
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: hats-task-output
           path: ${{ steps.run.outputs.output_dir }}/
@@ -357,7 +357,7 @@ jobs:
 
       - name: Upload playground workspace
         if: always() && steps.run.outputs.workspace_root != ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: hats-playground
           path: ${{ steps.run.outputs.workspace_root }}/
@@ -365,7 +365,7 @@ jobs:
 
       - name: Upload JSON result
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: hats-task-result
           path: /tmp/hats-task-result.json
