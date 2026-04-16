@@ -12,6 +12,7 @@
 #         diff_artifact: pr-diff  # or: diff: ${{ steps.get-diff.outputs.diff }}
 #       secrets:
 #         ollama_api_key: ${{ secrets.OLLAMA_API_KEY }}
+#         openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
 #
 # Note: The workflow auto-detects the repository via ${{ github.repository }},
 # so forks work without modifying this file.
@@ -69,7 +70,10 @@ on:
         description: "Ollama Cloud API key for LLM inference."
         required: true
       ollama_base_url:
-        description: "Ollama Cloud base URL (default: https://api.ollama.ai/v1)."
+        description: "Ollama Cloud base URL (default: https://ollama.com)."
+        required: false
+      openrouter_api_key:
+        description: "OpenRouter API key for cross-provider fallback."
         required: false
 
 jobs:
@@ -144,7 +148,8 @@ jobs:
         id: run
         env:
           OLLAMA_API_KEY: ${{ secrets.ollama_api_key }}
-          OLLAMA_BASE_URL: ${{ secrets.ollama_base_url || 'https://api.ollama.ai/v1' }}
+          OLLAMA_CLOUD_URL: ${{ secrets.ollama_base_url || 'https://ollama.com' }}
+          OPENROUTER_API_KEY: ${{ secrets.openrouter_api_key }}
         shell: bash
         run: |
           ARGS=(
