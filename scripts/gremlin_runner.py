@@ -181,8 +181,9 @@ def phase_review(config: dict, gremlins_root: Path, since: str = "24 hours ago")
                 ["git", "log", f"--since={since_arg}", "--oneline"],
                 capture_output=True, text=True, timeout=10,
                 cwd=repo_path,
+                encoding="utf-8", errors="replace",
             )
-            recent_commits = result.stdout.strip()
+            recent_commits = (result.stdout or "").strip()
         except (subprocess.TimeoutExpired, FileNotFoundError):
             recent_commits = ""
 
@@ -197,8 +198,9 @@ def phase_review(config: dict, gremlins_root: Path, since: str = "24 hours ago")
                 ["git", "rev-list", "--count", "HEAD"],
                 capture_output=True, text=True, timeout=10,
                 cwd=repo_path,
+                encoding="utf-8", errors="replace",
             )
-            total_commits = int(count_result.stdout.strip()) if count_result.returncode == 0 else 0
+            total_commits = int((count_result.stdout or "0").strip()) if count_result.returncode == 0 else 0
         except (subprocess.TimeoutExpired, FileNotFoundError, ValueError):
             total_commits = 0
 
@@ -209,6 +211,7 @@ def phase_review(config: dict, gremlins_root: Path, since: str = "24 hours ago")
                     ["git", "diff", "--root", "HEAD"],
                     capture_output=True, text=True, timeout=10,
                     cwd=repo_path,
+                    encoding="utf-8", errors="replace",
                 )
             else:
                 # Use up to 5 commits back, but never beyond the first commit
@@ -217,8 +220,9 @@ def phase_review(config: dict, gremlins_root: Path, since: str = "24 hours ago")
                     ["git", "diff", f"HEAD~{depth}..HEAD"],
                     capture_output=True, text=True, timeout=10,
                     cwd=repo_path,
+                    encoding="utf-8", errors="replace",
                 )
-            recent_diff = result.stdout.strip()[:8000]
+            recent_diff = (result.stdout or "").strip()[:8000]
         except (subprocess.TimeoutExpired, FileNotFoundError):
             recent_diff = ""
 
