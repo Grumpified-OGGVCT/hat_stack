@@ -1,8 +1,18 @@
 # Hat-to-Model Configuration
 # Based on HATS_TEAM_IMPLEMENTATION_GUIDE.md + soul.md model pool merge
-# Uses native Ollama API (/api/chat) for both local and cloud models
-# Local models → localhost:11434/api/chat (no auth)
-# Cloud models → ollama.com/api/chat (Bearer token via OLLAMA_API_KEY)
+#
+# Multi-provider LLM routing:
+#   Each model can route to Ollama Local, Ollama Cloud, OpenRouter, or other
+#   OpenAI-compatible providers. Provider is determined by the `provider` field
+#   on each model, or defaults to `ollama_cloud` for cloud models and
+#   `ollama_local` for local models.
+#
+# Local-only mode: Set local_only.enabled: true to force ALL models to local.
+# This is the PII-safe mode — no data leaves the machine.
+#
+# Adding a provider: Add it under `providers:` below, set the API key env var,
+# set `enabled: true`, and add models with `provider: <name>`. For
+# OpenAI-compatible APIs, set `api_format: openai_compatible` — no code changes.
 #
 # Model pool per soul.md (April 2026):
 #   Tier 1 (Critical Reasoning): glm-5.1:cloud, kimi-k2.5:cloud, deepseek-v3.2:cloud
@@ -17,6 +27,73 @@
 #   ANY task involving API keys, credentials, secrets, .env files, or auth
 #   tokens gets a LOCAL model sub-agent. No exceptions.
 
+# ---------------------------------------------------------------------------
+# Provider configuration — which LLM APIs to route to
+# ---------------------------------------------------------------------------
+providers:
+  ollama_local:
+    name: "Ollama Local"
+    base_url_env: OLLAMA_LOCAL_URL
+    default_base_url: "http://localhost:11434"
+    api_key_env: ""
+    api_format: ollama
+    enabled: true
+
+  ollama_cloud:
+    name: "Ollama Cloud"
+    base_url_env: OLLAMA_CLOUD_URL
+    default_base_url: "https://ollama.com"
+    api_key_env: OLLAMA_API_KEY
+    api_format: ollama
+    enabled: true
+    default: true  # Default cloud provider for backward compatibility
+
+  openrouter:
+    name: "OpenRouter"
+    base_url_env: OPENROUTER_BASE_URL
+    default_base_url: "https://openrouter.ai/api/v1"
+    api_key_env: OPENROUTER_API_KEY
+    api_format: openai_compatible
+    enabled: false  # Enable when you set OPENROUTER_API_KEY
+
+  # Future providers — uncomment and configure to enable.
+  # For any OpenAI-compatible API, just set api_format: openai_compatible.
+  # No code changes required.
+  #
+  # deepinfra:
+  #   name: "DeepInfra"
+  #   base_url_env: DEEPINFRA_BASE_URL
+  #   default_base_url: "https://api.deepinfra.com/v1/openai"
+  #   api_key_env: DEEPINFRA_API_KEY
+  #   api_format: openai_compatible
+  #   enabled: false
+  #
+  # groq:
+  #   name: "Groq"
+  #   base_url_env: GROQ_BASE_URL
+  #   default_base_url: "https://api.groq.com/openai/v1"
+  #   api_key_env: GROQ_API_KEY
+  #   api_format: openai_compatible
+  #   enabled: false
+  #
+  # together:
+  #   name: "Together AI"
+  #   base_url_env: TOGETHER_BASE_URL
+  #   default_base_url: "https://api.together.xyz/v1"
+  #   api_key_env: TOGETHER_API_KEY
+  #   api_format: openai_compatible
+  #   enabled: false
+
+# ---------------------------------------------------------------------------
+# Local-only mode — forces ALL hats to use local models
+# Set enabled: true for PII-safe operation (no data leaves the machine).
+# Hats with local_only: true are unaffected (already local).
+# Other hats fall back to their local_model or the best available local model.
+# ---------------------------------------------------------------------------
+local_only:
+  enabled: false
+
+# Legacy API section (kept for reference; providers section above is now authoritative)
 api:
   cloud_url_env: OLLAMA_CLOUD_URL
   default_cloud_url: "https://ollama.com"
@@ -24,14 +101,41 @@ api:
   default_local_url: "http://localhost:11434"
   api_key_env: OLLAMA_API_KEY
 
+# LoLLMs Hub — Multi-tenant agentic runtime (optional provider)
+# Acts as both Ollama-compatible and OpenAI-compatible proxy.
+# Supports: smart routing, ensemble orchestration, virtual agents,
+# multi-node GPU clustering, per-user memory, and rate limiting.
+# See: https://github.com/ParisNeo/lollms
+lollms:
+  enabled: false  # Enable when LoLLMs Hub is running
+  url_env: LOLLMS_HUB_URL
+  default_url: "http://localhost:8081"
+  api_key_env: LOLLMS_HUB_API_KEY
+  # LoLLMs provides both Ollama-compatible (/api/chat) and
+  # OpenAI-compatible (/v1/chat/completions) endpoints on the same port.
+  # Hat Stack will route through the Ollama-compatible endpoint
+  # when LoLLMs is enabled, falling back to direct Ollama when not.
+
+# Moltbook — "Sign in with Moltbook" agent authentication (disabled)
+# https://moltbook.com/developers
+# AI agents authenticate using their Moltbook identity tokens.
+# Your app API key (prefixed moltdev_) is stored in MOLTBOOK_APP_KEY.
+moltbook:
+  enabled: false
+  app_key_env: MOLTBOOK_APP_KEY
+  verify_url: "https://moltbook.com/api/v1/agents/verify-identity"
+  audience: "hat-stack"  # Audience restriction prevents token forwarding
+  header_name: "X-Moltbook-Identity"
+
 models:
-  # --- Cloud Models (Tier 1) ---
+  # --- Cloud Models (Tier 1) - Ollama Cloud ---
   glm-5.1:cloud:
     tier: 1
     context_window: 200000
     input_cost_per_m: 0.40
     output_cost_per_m: 1.10
     local: false
+    provider: ollama_cloud
     swe_bench: 77.0
   kimi-k2.5:cloud:
     tier: 1
@@ -39,6 +143,7 @@ models:
     input_cost_per_m: 0.42
     output_cost_per_m: 1.50
     local: false
+    provider: ollama_cloud
     swe_bench: 76.8
   deepseek-v3.2:cloud:
     tier: 1
@@ -46,15 +151,39 @@ models:
     input_cost_per_m: 0.10
     output_cost_per_m: 0.28
     local: false
+    provider: ollama_cloud
     swe_bench: 67.0
 
-  # --- Cloud Models (Tier 2) ---
+  # --- Cloud Models (Tier 1) - OpenRouter backups ---
+  # Enable the openrouter provider and set OPENROUTER_API_KEY to use these.
+  # model_id maps to OpenRouter's model identifiers.
+  glm-5.1:openrouter:
+    tier: 1
+    context_window: 200000
+    input_cost_per_m: 0.35
+    output_cost_per_m: 1.00
+    local: false
+    provider: openrouter
+    model_id: "anthropic/claude-sonnet-4-20250514"
+    swe_bench: 77.0
+  deepseek-v3.2:openrouter:
+    tier: 1
+    context_window: 128000
+    input_cost_per_m: 0.07
+    output_cost_per_m: 0.21
+    local: false
+    provider: openrouter
+    model_id: "deepseek/deepseek-chat-v3-0324"
+    swe_bench: 67.0
+
+  # --- Cloud Models (Tier 2) - Ollama Cloud ---
   devstral-2:123b-cloud:
     tier: 2
     context_window: 256000
     input_cost_per_m: 0.15
     output_cost_per_m: 0.60
     local: false
+    provider: ollama_cloud
     swe_bench: 72.2
   minimax-m2.7:cloud:
     tier: 2
@@ -62,15 +191,28 @@ models:
     input_cost_per_m: 0.30
     output_cost_per_m: 1.20
     local: false
+    provider: ollama_cloud
     swe_bench: 78.0
 
-  # --- Cloud Models (Tier 3) ---
+  # --- Cloud Models (Tier 2) - OpenRouter backups ---
+  devstral-2:123b-openrouter:
+    tier: 2
+    context_window: 256000
+    input_cost_per_m: 0.15
+    output_cost_per_m: 0.60
+    local: false
+    provider: openrouter
+    model_id: "mistralai/devstral-small-2507"
+    swe_bench: 72.2
+
+  # --- Cloud Models (Tier 3) - Ollama Cloud ---
   nemotron-3-super:cloud:
     tier: 3
     context_window: 1000000
     input_cost_per_m: 0.25
     output_cost_per_m: 0.80
     local: false
+    provider: ollama_cloud
     swe_bench: 60.5
   qwen3-coder:480b-cloud:
     tier: 3
@@ -78,15 +220,17 @@ models:
     input_cost_per_m: 0.20
     output_cost_per_m: 0.80
     local: false
+    provider: ollama_cloud
     swe_bench: 65.0
 
-  # --- Cloud Models (Tier 4) ---
+  # --- Cloud Models (Tier 4) - Ollama Cloud ---
   nemotron-3-nano:cloud:
     tier: 4
     context_window: 32000
     input_cost_per_m: 0.08
     output_cost_per_m: 0.20
     local: false
+    provider: ollama_cloud
     swe_bench: 40.0
   ministral-3:cloud:
     tier: 4
@@ -94,6 +238,7 @@ models:
     input_cost_per_m: 0.05
     output_cost_per_m: 0.15
     local: false
+    provider: ollama_cloud
     swe_bench: 35.0
 
   # --- Local Models (Tier L — never leave the machine) ---
@@ -588,6 +733,7 @@ execution:
   max_local_parallel: 1  # Local models run one at a time
   trio_mode_cloud: 3     # Fallback: 3 cloud + 1 local when budget is tight
   local_num_ctx: 16384   # Context window for local model calls (16K with 64GB RAM)
+  fallback_across_providers: true  # Try equivalent models on other providers when primary fails
   retry:
     max_attempts: 3
     initial_backoff_seconds: 1
@@ -611,3 +757,69 @@ risk_score:
   low_cap: 5
   allow_threshold: 20
   escalate_threshold: 60
+
+# Gremlin agent society — overnight autonomous review loop
+# Gremlins use the hat system: each phase maps to a hat (persona, model chain, fallback)
+# Multi-repo: Gremlins scan all repos listed below and produce per-repo findings
+# plus a cross-repo Herald digest each morning.
+gremlins:
+  enabled: true
+  gremlins_path: ".gremlins"
+
+  # Repos to monitor — add or remove repos here.
+  # Each repo gets its own .gremlins/repos/<name>/ directory for findings.
+  # Optional per-repo keys: skip_phases (list), enabled (bool, default true)
+  repos:
+    - path: "C:/Users/gerry/generic_workspace/GrumpRolled"
+    - path: "C:/Users/gerry/generic_workspace/hat_stack"
+    - path: "C:/Users/gerry/generic_workspace/HLF_MCP"
+    - path: "C:/Users/gerry/generic_workspace/lollms_hub"
+    - path: "C:/Users/gerry/generic_workspace/lollms_hub_workflows"
+    - path: "C:/Users/gerry/generic_workspace/Memory"
+    - path: "C:/Users/gerry/generic_workspace/Omni_Orchestrator"
+    - path: "C:/Users/gerry/generic_workspace/scripts"
+    - path: "C:/Users/gerry/generic_workspace/services_matrix"
+    - path: "C:/Users/gerry/generic_workspace/the_factory"
+    - path: "C:/Users/gerry/generic_workspace/_universal_skills"
+    - path: "C:/Users/gerry/generic_workspace/ChicComs"
+    - path: "C:/Users/gerry/generic_workspace/frankenstein-mcp"
+
+  # Schedule — daemon triggers each phase at its cron time.
+  # Old format (list) still works with DeprecationWarning.
+  overnight_schedule:
+    review:  "0 2 * * *"     # 2 AM — Review queue (Black Hat)
+    propose: "0 3 * * *"     # 3 AM — Proposals (Gold Hat)
+    analyze: "0 4 * * *"     # 4 AM — Deep analysis (Purple Hat)
+    herald:  "0 5 * * *"     # 5 AM — Herald digest (Blue Hat)
+  # Map gremlin phases to hats (hat provides persona, model chain, fallback)
+  phase_to_hat:
+    review: "black"      # Black Hat — security & exploit scanning
+    propose: "gold"      # Gold Hat — CoVE synthesis & proposals
+    analyze: "purple"     # Purple Hat — deep analysis (dynamic override per proposal)
+    herald: "blue"       # Blue Hat — process & digest formatting
+  # Overnight mode — larger local models, extended timeouts
+  overnight:
+    enabled: true
+    schedule_start: "01:00"
+    schedule_end: "07:00"
+    model_overrides:
+      review: "qwen3.5:9b"       # Up from gemma4:e2b overnight
+      analyze: "qwen3.5:9b"      # Deep analysis gets the biggest model
+      propose: "gemma3:12b"       # Synthesis with 12b model
+      # herald stays at gemma4:e2b — digests don't need heft
+    timeout_multiplier: 5          # 600s instead of 120s
+    large_local_models:
+      - "qwen3.5:9b"
+      - "gemma3:12b"
+      - "deepseek-r1:8b"
+      - "granite3.3:8b"
+    wake_on_lan:
+      enabled: false
+      target_mac: ""               # MAC address for WoL magic packet
+  governance:
+    require_human_approval: true
+    proposal_ttl_hours: 48     # Proposals expire after 48h if not approved
+    max_active_proposals: 10
+  herald:
+    channels: ["social_log"]    # Future: telegram, discord, etc.
+    max_daily_posts: 3

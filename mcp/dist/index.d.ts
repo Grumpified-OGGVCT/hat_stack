@@ -2,9 +2,11 @@
 /**
  * index.ts — MCP server entry point for Hat Stack.
  *
- * Exposes 6 tools via stdio transport:
+ * Exposes 10 tools via stdio transport:
  *   hats_review, hats_task, hats_list_models, hats_check_status,
- *   hats_get_config, hats_assemble_team
+ *   hats_get_config, hats_assemble_team,
+ *   gremlin_kickoff, gremlin_proposal, gremlin_herald,
+ *   moltbook_verify
  *
  * Usage:
  *   node dist/index.js

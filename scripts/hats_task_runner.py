@@ -107,6 +107,35 @@ TASK_PROFILES = {
         "model_tier": 1,
         "output_type": "markdown",
     },
+    # --- Gremlin task types ---
+    "gremlin_review": {
+        "description": "Gremlin Scout: review recent changes, write findings to Moltbook",
+        "recommended_hats": ["black", "blue", "purple"],
+        "primary_hat": "black",
+        "model_tier": 0,  # Always local
+        "output_type": "markdown",
+    },
+    "gremlin_propose": {
+        "description": "Gremlin Strategist: create governance proposals from findings",
+        "recommended_hats": ["purple", "green", "cyan"],
+        "primary_hat": "purple",
+        "model_tier": 0,
+        "output_type": "markdown",
+    },
+    "gremlin_analyze": {
+        "description": "Gremlin Analyst: deep-dive into specific concerns",
+        "recommended_hats": ["black", "purple", "red", "gray", "brown", "gold"],
+        "primary_hat": "black",
+        "model_tier": 0,
+        "output_type": "markdown",
+    },
+    "gremlin_herald": {
+        "description": "Gremlin Herald: compose social output from recent findings",
+        "recommended_hats": ["blue", "green"],
+        "primary_hat": "blue",
+        "model_tier": 0,
+        "output_type": "markdown",
+    },
 }
 
 DEFAULT_CATEGORIES = {

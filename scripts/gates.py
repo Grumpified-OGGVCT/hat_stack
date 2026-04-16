@@ -2,15 +2,18 @@
 """
 gates.py — Gate engine for Hat Stack pipeline.
 
-Implements all 5 gates from SPEC §7:
+Implements all 6 gates from SPEC §7 + §G6:
   G1: Cost Budget Gate — estimate tokens, check budget, block or trim
   G2: Security Fast-Path Gate — after Black Hat completes, check for CRITICAL
   G3: Consistency Gate — detect contradictions between hat findings
   G4: Timeout Gate — per-hat timeout with graceful degradation
   G5: Final Decision Gate — CoVE verdict routing
+  G6: Governance Gate — Gremlin proposals require human approval
 """
 
 import sys
+import time
+import calendar
 from typing import Any
 
 from hats_common import estimate_cost
@@ -301,4 +304,75 @@ def gate_final_decision(verdict: str, risk_score: int, config: dict,
         "risk_score": risk_score,
         "action": action,
         "requires_human_review": requires_hitl,
+    }
+
+
+# ---------------------------------------------------------------------------
+# G6: Governance Gate (Gremlin proposals)
+# ---------------------------------------------------------------------------
+
+def gate_governance(proposal: dict, config: dict) -> dict:
+    """Governance Gate (G6) — all Gremlin actions that modify code or project
+    state must pass through human approval.
+
+    PENDING_HUMAN proposals block execution until a human approves.
+    APPROVED proposals proceed. REJECTED/EXPIRED proposals are discarded.
+    Proposals older than proposal_ttl_hours auto-expire.
+
+    Returns dict with keys:
+      allowed: bool
+      proposal_id: str
+      status: str
+      reason: str
+      action: "execute" | "wait" | "discard"
+    """
+    gremlins_cfg = config.get("gremlins", {})
+    governance_cfg = gremlins_cfg.get("governance", {})
+    ttl_hours = governance_cfg.get("proposal_ttl_hours", 48)
+
+    proposal_status = proposal.get("status", "PENDING_HUMAN")
+    proposal_id = proposal.get("id", "unknown")
+
+    if proposal_status == "APPROVED":
+        return {
+            "allowed": True,
+            "proposal_id": proposal_id,
+            "status": proposal_status,
+            "reason": "Proposal approved by human",
+            "action": "execute",
+        }
+
+    if proposal_status in ("REJECTED", "EXPIRED"):
+        reason = proposal.get("rejected_reason", f"Proposal {proposal_status.lower()}")
+        return {
+            "allowed": False,
+            "proposal_id": proposal_id,
+            "status": proposal_status,
+            "reason": reason,
+            "action": "discard",
+        }
+
+    # PENDING_HUMAN — check if expired
+    created = proposal.get("created", "")
+    if created:
+        try:
+            created_time = calendar.timegm(time.strptime(created, "%Y-%m-%dT%H:%M:%SZ"))
+            age_hours = (time.time() - created_time) / 3600
+            if age_hours > ttl_hours:
+                return {
+                    "allowed": False,
+                    "proposal_id": proposal_id,
+                    "status": "EXPIRED",
+                    "reason": f"Auto-expired after {age_hours:.0f}h (TTL: {ttl_hours}h)",
+                    "action": "discard",
+                }
+        except (ValueError, OverflowError):
+            pass
+
+    return {
+        "allowed": False,
+        "proposal_id": proposal_id,
+        "status": proposal_status,
+        "reason": "Proposal awaiting human approval",
+        "action": "wait",
     }

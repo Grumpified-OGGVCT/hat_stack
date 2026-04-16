@@ -1,8 +1,9 @@
 /**
  * hats-client.ts — Python runner invoker for Hat Stack MCP server.
  *
- * Spawns hats_runner.py and hats_task_runner.py as subprocesses,
- * captures their JSON output, and returns structured results.
+ * Spawns hats_runner.py, hats_task_runner.py, and gremlin_runner.py as
+ * subprocesses, captures their JSON output, and returns structured results.
+ * Also reads/writes .gremlins/ directly for Gremlin governance operations.
  */
 export interface HatReviewResult {
     verdict: string;
@@ -54,4 +55,22 @@ export declare function getConfig(): Promise<string>;
  * Assemble a custom team of hats for a specific task.
  */
 export declare function assembleTeam(taskDescription: string, maxCloud?: number, maxLocal?: number, priority?: "speed" | "thoroughness" | "budget", context?: string): Promise<unknown>;
+/**
+ * Run a Gremlin review cycle (spawns gremlin_runner.py).
+ */
+export declare function runGremlinKickoff(scope?: string): Promise<unknown>;
+/**
+ * List, approve, or reject Gremlin governance proposals.
+ * Reads .gremlins/proposals/ directly.
+ */
+export declare function handleGremlinProposal(action: string, proposalId?: string, reason?: string, statusFilter?: string): Promise<unknown>;
+/**
+ * Read recent Herald social output from .gremlins/social_log/.
+ */
+export declare function readGremlinHerald(since?: string): Promise<unknown>;
+/**
+ * Verify a Moltbook identity token.
+ * Delegates to moltbook-auth.ts module.
+ */
+export declare function verifyMoltbookIdentityToken(identityToken: string, audience?: string, useCache?: boolean): Promise<unknown>;
 //# sourceMappingURL=hats-client.d.ts.map

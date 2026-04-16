@@ -2,8 +2,9 @@
 /**
  * hats-client.ts — Python runner invoker for Hat Stack MCP server.
  *
- * Spawns hats_runner.py and hats_task_runner.py as subprocesses,
- * captures their JSON output, and returns structured results.
+ * Spawns hats_runner.py, hats_task_runner.py, and gremlin_runner.py as
+ * subprocesses, captures their JSON output, and returns structured results.
+ * Also reads/writes .gremlins/ directly for Gremlin governance operations.
  */
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
@@ -44,6 +45,10 @@ exports.runHatTask = runHatTask;
 exports.listModels = listModels;
 exports.getConfig = getConfig;
 exports.assembleTeam = assembleTeam;
+exports.runGremlinKickoff = runGremlinKickoff;
+exports.handleGremlinProposal = handleGremlinProposal;
+exports.readGremlinHerald = readGremlinHerald;
+exports.verifyMoltbookIdentityToken = verifyMoltbookIdentityToken;
 const child_process_1 = require("child_process");
 const os = __importStar(require("os"));
 const path = __importStar(require("path"));
@@ -53,7 +58,9 @@ const HAT_STACK_ROOT = path.resolve(__dirname, "../../");
 const SCRIPTS_DIR = path.join(HAT_STACK_ROOT, "scripts");
 const HATS_RUNNER = path.join(SCRIPTS_DIR, "hats_runner.py");
 const HATS_TASK_RUNNER = path.join(SCRIPTS_DIR, "hats_task_runner.py");
+const GREMLIN_RUNNER = path.join(SCRIPTS_DIR, "gremlin_runner.py");
 const CONFIG_PATH = path.join(SCRIPTS_DIR, "hat_configs.yml");
+const MOLTBOOK_ROOT = HAT_STACK_ROOT; // .gremlins/ is at repo root
 /**
  * Run a hat review on a diff.
  */
@@ -201,13 +208,143 @@ async function assembleTeam(taskDescription, maxCloud = 4, maxLocal = 1, priorit
         total_hats: team.length,
     };
 }
+// --- Gremlin functions ---
+/**
+ * Run a Gremlin review cycle (spawns gremlin_runner.py).
+ */
+async function runGremlinKickoff(scope = "all") {
+    const args = [
+        GREMLIN_RUNNER,
+        "--config", CONFIG_PATH,
+        "--gremlins-path", MOLTBOOK_ROOT,
+    ];
+    if (scope === "all") {
+        args.push("--all");
+    }
+    else {
+        args.push("--phase", scope);
+    }
+    const result = await spawnPython(args);
+    try {
+        return JSON.parse(result);
+    }
+    catch {
+        return { raw_output: result };
+    }
+}
+/**
+ * List, approve, or reject Gremlin governance proposals.
+ * Reads .gremlins/proposals/ directly.
+ */
+async function handleGremlinProposal(action, proposalId, reason, statusFilter) {
+    const moltbookDir = path.join(MOLTBOOK_ROOT, ".gremlins");
+    const proposalsDir = path.join(moltbookDir, "proposals");
+    if (action === "list") {
+        if (!fs.existsSync(proposalsDir)) {
+            return { proposals: [] };
+        }
+        const files = fs.readdirSync(proposalsDir).filter(f => f.endsWith(".json"));
+        const proposals = files.map(f => {
+            try {
+                return JSON.parse(fs.readFileSync(path.join(proposalsDir, f), "utf-8"));
+            }
+            catch {
+                return null;
+            }
+        }).filter(Boolean);
+        if (statusFilter) {
+            return { proposals: proposals.filter((p) => p?.status === statusFilter) };
+        }
+        return { proposals };
+    }
+    if (!proposalId) {
+        throw new Error("proposal_id is required for approve/reject actions");
+    }
+    // Find the proposal file
+    if (!fs.existsSync(proposalsDir)) {
+        throw new Error(`No proposals directory found at ${proposalsDir}`);
+    }
+    const matchingFile = fs.readdirSync(proposalsDir)
+        .find(f => f.startsWith(proposalId) && f.endsWith(".json"));
+    if (!matchingFile) {
+        throw new Error(`Proposal ${proposalId} not found`);
+    }
+    const filePath = path.join(proposalsDir, matchingFile);
+    const proposal = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+    if (action === "approve") {
+        proposal.status = "APPROVED";
+        proposal.approved_by = "human";
+        proposal.updated = new Date().toISOString();
+    }
+    else if (action === "reject") {
+        proposal.status = "REJECTED";
+        proposal.rejected_reason = reason || "Rejected by human operator";
+        proposal.updated = new Date().toISOString();
+    }
+    fs.writeFileSync(filePath, JSON.stringify(proposal, null, 2), "utf-8");
+    return proposal;
+}
+/**
+ * Read recent Herald social output from .gremlins/social_log/.
+ */
+async function readGremlinHerald(since) {
+    const socialDir = path.join(MOLTBOOK_ROOT, ".gremlins", "social_log");
+    if (!fs.existsSync(socialDir)) {
+        return { entries: [] };
+    }
+    const files = fs.readdirSync(socialDir)
+        .filter(f => f.endsWith(".md"))
+        .sort();
+    const entries = files.map(f => {
+        const date = f.substring(0, 10);
+        if (since && date < since)
+            return null;
+        return {
+            date,
+            content: fs.readFileSync(path.join(socialDir, f), "utf-8"),
+            path: path.join(socialDir, f),
+        };
+    }).filter(Boolean);
+    return { entries };
+}
+// --- Moltbook auth function ---
+/**
+ * Verify a Moltbook identity token.
+ * Delegates to moltbook-auth.ts module.
+ */
+async function verifyMoltbookIdentityToken(identityToken, audience, useCache) {
+    // Dynamic import to avoid loading yaml/fs at module level
+    const { verifyMoltbookIdentity, formatAgentIdentity } = await import("./moltbook-auth.js");
+    const result = await verifyMoltbookIdentity(identityToken, {
+        audience,
+        useCache: useCache !== false,
+    });
+    if (result.valid && result.agent) {
+        return {
+            valid: true,
+            agent: result.agent,
+            display: formatAgentIdentity(result.agent),
+        };
+    }
+    return result;
+}
 // --- Helpers ---
 function loadConfig() {
     return Promise.resolve(yaml.load(fs.readFileSync(CONFIG_PATH, "utf-8")));
 }
+function resolvePythonBinary() {
+    // Inside Docker (Linux container): python3 is standard
+    // On Windows: "python" resolves to the Python launcher
+    // On macOS/Linux: "python3" is the norm
+    if (process.platform === "win32") {
+        return "python";
+    }
+    return "python3";
+}
 function spawnPython(args, stdin) {
+    const pythonBin = resolvePythonBinary();
     return new Promise((resolve, reject) => {
-        const proc = (0, child_process_1.spawn)("python", args, {
+        const proc = (0, child_process_1.spawn)(pythonBin, args, {
             cwd: SCRIPTS_DIR,
             env: { ...process.env },
             stdio: ["pipe", "pipe", "pipe"],

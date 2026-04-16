@@ -3,9 +3,11 @@
 /**
  * index.ts — MCP server entry point for Hat Stack.
  *
- * Exposes 6 tools via stdio transport:
+ * Exposes 10 tools via stdio transport:
  *   hats_review, hats_task, hats_list_models, hats_check_status,
- *   hats_get_config, hats_assemble_team
+ *   hats_get_config, hats_assemble_team,
+ *   gremlin_kickoff, gremlin_proposal, gremlin_herald,
+ *   moltbook_verify
  *
  * Usage:
  *   node dist/index.js
@@ -115,6 +117,51 @@ server.setRequestHandler(types_js_1.CallToolRequestSchema, async (request) => {
                     };
                 }
                 const result = await (0, hats_client_js_1.assembleTeam)(taskDescription, maxCloud, maxLocal, priority, context);
+                return {
+                    content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+                };
+            }
+            case "gremlin_kickoff": {
+                const scope = args?.scope || "all";
+                const result = await (0, hats_client_js_1.runGremlinKickoff)(scope);
+                return {
+                    content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+                };
+            }
+            case "gremlin_proposal": {
+                const action = args?.action;
+                const proposalId = args?.proposal_id;
+                const reason = args?.reason;
+                const statusFilter = args?.status_filter;
+                if (!action) {
+                    return {
+                        content: [{ type: "text", text: "Error: 'action' parameter is required (list, approve, reject)" }],
+                        isError: true,
+                    };
+                }
+                const result = await (0, hats_client_js_1.handleGremlinProposal)(action, proposalId, reason, statusFilter);
+                return {
+                    content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+                };
+            }
+            case "gremlin_herald": {
+                const since = args?.since;
+                const result = await (0, hats_client_js_1.readGremlinHerald)(since);
+                return {
+                    content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+                };
+            }
+            case "moltbook_verify": {
+                const identityToken = args?.identity_token;
+                const audience = args?.audience;
+                const useCache = args?.use_cache;
+                if (!identityToken) {
+                    return {
+                        content: [{ type: "text", text: "Error: 'identity_token' parameter is required" }],
+                        isError: true,
+                    };
+                }
+                const result = await (0, hats_client_js_1.verifyMoltbookIdentityToken)(identityToken, audience, useCache);
                 return {
                     content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
                 };

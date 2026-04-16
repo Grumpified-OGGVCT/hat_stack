@@ -1,0 +1,60 @@
+name: Hat Stack Gremlin — Overnight Autonomous Review
+
+on:
+  schedule:
+    - cron: '0 2 * * *'  # 2 AM UTC daily
+  workflow_dispatch:       # Manual trigger
+    inputs:
+      phase:
+        description: 'Phase to run (all, review, propose, analyze, herald)'
+        required: false
+        default: 'all'
+
+jobs:
+  gremlin-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 5  # Need recent history for Scout diff
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r scripts/requirements.txt
+
+      - name: Initialize Gremlins Memory
+        run: python -c "from scripts.gremlin_memory import init_gremlin_memory; init_gremlin_memory('.')"
+
+      - name: Run Gremlin Phase
+        env:
+          OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
+          OLLAMA_LOCAL_URL: ${{ vars.OLLAMA_LOCAL_URL || 'http://localhost:11434' }}
+          OLLAMA_CLOUD_URL: ${{ vars.OLLAMA_CLOUD_URL || 'https://ollama.com' }}
+        run: |
+          if [ "${{ github.event.inputs.phase }}" = "all" ] || [ -z "${{ github.event.inputs.phase }}" ]; then
+            python scripts/gremlin_runner.py --all
+          else
+            python scripts/gremlin_runner.py --phase ${{ github.event.inputs.phase }}
+          fi
+
+      - name: Show Herald Digest
+        if: always()
+        run: |
+          if [ -f ".gremlins/social_log/$(date +%Y-%m-%d)-social_log.md" ]; then
+            cat ".gremlins/social_log/$(date +%Y-%m-%d)-social_log.md"
+          fi
+
+      - name: Upload Gremlins Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gremlins-${{ github.run_id }}
+          path: .gremlins/
+          retention-days: 30

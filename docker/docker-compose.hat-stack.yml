@@ -1,0 +1,63 @@
+# docker-compose.hat-stack.yml — Hat Stack containerized services
+#
+# Usage:
+#   MCP server (persistent):
+#     docker compose -f docker/docker-compose.hat-stack.yml --profile mcp up -d
+#
+#   Pipeline one-shot:
+#     echo 'diff...' | docker compose -f docker/docker-compose.hat-stack.yml \
+#       --profile pipeline run --rm hat-stack-pipeline --diff -
+#
+#   Gremlin overnight run:
+#     docker compose -f docker/docker-compose.hat-stack.yml \
+#       --profile gremlin run --rm hat-stack-gremlin
+
+services:
+  # --- Persistent MCP Server ---
+  hat-stack-mcp:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.mcp
+    container_name: hat-stack-mcp
+    profiles: ["mcp"]
+    restart: unless-stopped
+    environment:
+      - OLLAMA_LOCAL_URL=http://host.docker.internal:11434
+      - OLLAMA_CLOUD_URL=https://ollama.com
+      - OLLAMA_API_KEY=${OLLAMA_API_KEY:-}
+    mem_limit: 512m
+    stdin_open: true  # MCP stdio transport needs stdin
+
+  # --- Ephemeral Pipeline Runner ---
+  hat-stack-pipeline:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.pipeline
+    container_name: hat-stack-pipeline
+    profiles: ["pipeline"]
+    environment:
+      - OLLAMA_LOCAL_URL=http://host.docker.internal:11434
+      - OLLAMA_CLOUD_URL=https://ollama.com
+      - OLLAMA_API_KEY=${OLLAMA_API_KEY:-}
+    mem_limit: 2g
+    volumes:
+      - ../.hats:/app/.hats           # Checkpoints
+      - ../.gremlins:/app/.gremlins   # Gremlin Moltbook (if exists)
+
+  # --- Gremlin Overnight Runner ---
+  hat-stack-gremlin:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.pipeline
+    container_name: hat-stack-gremlin
+    profiles: ["gremlin"]
+    environment:
+      - OLLAMA_LOCAL_URL=http://host.docker.internal:11434
+      - OLLAMA_CLOUD_URL=https://ollama.com
+      - OLLAMA_API_KEY=${OLLAMA_API_KEY:-}
+    mem_limit: 2g
+    volumes:
+      - ../.gremlins:/app/.gremlins
+      - ../.hats:/app/.hats
+    entrypoint: ["python", "scripts/gremlin_runner.py"]
+    command: ["--all"]

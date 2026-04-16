@@ -1,0 +1,47 @@
+# Dockerfile.mcp — Persistent Hat Stack MCP server
+# Builds a Node.js image that also includes Python for invoking the pipeline.
+# Runs the MCP stdio transport server that Claude Code or other agents connect to.
+
+# Stage 1: Install Node.js dependencies
+FROM node:20-slim AS node-builder
+
+WORKDIR /build/mcp
+COPY mcp/package.json mcp/package-lock.json* ./
+RUN npm ci --omit=dev
+
+# Stage 2: Install Python + pip dependencies
+FROM node:20-slim
+
+LABEL org.opencontainers.image.title="Hat Stack MCP Server"
+LABEL org.opencontainers.image.description="Persistent Hat Stack MCP server for Claude Code and other agents"
+LABEL org.opencontainers.image.source="https://github.com/Grumpified-OGGVCT/hat_stack"
+
+# Install Python3 + pip
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends python3 python3-pip python3-venv && \
+    rm -rf /var/lib/apt/lists/*
+
+# Create venv and install Python deps
+WORKDIR /app
+COPY scripts/requirements.txt /app/scripts/requirements.txt
+RUN python3 -m venv /app/.venv && \
+    /app/.venv/bin/pip install --no-cache-dir -r /app/scripts/requirements.txt
+
+# Copy Node.js built artifacts
+COPY --from=node-builder /build/mcp/node_modules /app/mcp/node_modules
+COPY mcp/dist/ /app/mcp/dist/
+COPY mcp/package.json /app/mcp/package.json
+
+# Copy Python scripts
+COPY scripts/ /app/scripts/
+
+# Make Python venv the default
+ENV PATH="/app/.venv/bin:${PATH}"
+
+# Default Ollama local URL
+ENV OLLAMA_LOCAL_URL="http://host.docker.internal:11434"
+ENV OLLAMA_CLOUD_URL="https://ollama.com"
+
+WORKDIR /app/mcp
+
+ENTRYPOINT ["node", "dist/index.js"]

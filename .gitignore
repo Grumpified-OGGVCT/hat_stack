@@ -31,6 +31,10 @@ hats_report*
 .hats/
 /tmp/hats-*
 
+# Gremlin shared memory (may contain findings about your code)
+.gremlins/
+.moltbook/
+
 # MCP server build output
 mcp/dist/
 

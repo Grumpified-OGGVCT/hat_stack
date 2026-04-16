@@ -5,9 +5,11 @@ hats_common.py — Shared library for Hat Stack runners.
 Extracted from hats_runner.py and hats_task_runner.py to eliminate duplication.
 Provides:
   - Config loading
-  - Ollama API calls with retry, exponential backoff, and circuit breaker
+  - Multi-provider LLM API calls with retry, exponential backoff, and circuit breaker
+  - Provider routing (Ollama Local, Ollama Cloud, OpenRouter, and any OpenAI-compatible API)
+  - Local-only mode enforcement (PII-safe, no-cloud operation)
   - Sensitive mode detection (credentials/PII)
-  - Model fallback chain construction
+  - Model fallback chain construction with cross-provider support
   - Cost estimation
   - Context window truncation
   - Concurrency primitives: LocalModelQueue, CloudModelPool, ConcurrencyCoordinator
@@ -26,6 +28,8 @@ from typing import Any, TypedDict
 
 import requests
 import yaml
+
+from provider_router import ProviderRouter, get_router, clear_router_cache
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -250,7 +254,7 @@ def truncate_to_context_window(text: str, context_window: int, reserve_output: i
 
 
 # ---------------------------------------------------------------------------
-# Ollama Cloud API caller with retry + circuit breaker
+# LLM API caller with multi-provider routing + retry + circuit breaker
 # ---------------------------------------------------------------------------
 
 def _is_local_model(config: dict, model: str) -> bool:
@@ -260,68 +264,117 @@ def _is_local_model(config: dict, model: str) -> bool:
     return bool(model_cfg.get("local", False))
 
 
+def _has_available_provider(config: dict, model_name: str) -> bool:
+    """Check if a model's provider has the necessary credentials available."""
+    models_cfg = config.get("models", {})
+    model_cfg = models_cfg.get(model_name, {})
+
+    if model_cfg.get("local", False):
+        return True  # Local models always available
+
+    # Check explicit provider
+    provider_name = model_cfg.get("provider")
+    if provider_name:
+        providers_cfg = config.get("providers", {})
+        provider_cfg = providers_cfg.get(provider_name, {})
+        api_key_env = provider_cfg.get("api_key_env", "")
+        if api_key_env and not os.environ.get(api_key_env, ""):
+            return False
+        if not provider_cfg.get("enabled", True):
+            return False
+
+    return True
+
+
+# Alias for new code — call_llm is the preferred name going forward
+call_llm = None  # Forward reference, set after call_ollama definition
+
+
 def call_ollama(config: dict, model: str, system_prompt: str, user_prompt: str,
                 temperature: float = 0.3, max_tokens: int = 4096,
                 timeout: int = 120, retry_policy: RetryPolicy | None = None,
                 hat_id: str | None = None) -> dict:
-    """Call an Ollama model — local or cloud — via the native Ollama API.
+    """Call an LLM model via the appropriate provider.
 
-    Uses /api/chat endpoint (native Ollama format, not OpenAI-compatible).
-    Local models route to localhost:11434/api/chat (no auth).
-    Cloud models route to https://ollama.com/api/chat (Bearer token).
+    Multi-provider routing: uses ProviderRouter to determine which API endpoint
+    and format to use based on the model's `provider` field in config. Supports
+    Ollama native (/api/chat) and OpenAI-compatible (/v1/chat/completions) APIs.
+
+    Local-only mode: If config.local_only.enabled is true, cloud models are
+    blocked (returns error to trigger fallback chain).
 
     Implements SPEC §8 retry policy with exponential backoff and jitter.
     Implements SPEC §8.3 circuit breaker (per-hat and per-provider).
     Truncates input to model's context window before sending.
     """
-    is_local = _is_local_model(config, model)
-
-    if is_local:
-        base_url = os.environ.get(
-            "OLLAMA_LOCAL_URL", "http://localhost:11434"
-        )
-        api_key = None
-    else:
-        base_url = os.environ.get(
-            "OLLAMA_CLOUD_URL", "https://ollama.com"
-        )
-        api_key = os.environ.get("OLLAMA_API_KEY", "")
-
-        if not api_key:
-            return {
-                "error": "OLLAMA_API_KEY not set (required for cloud model)",
-                "model": model,
-                "content": None,
-                "usage": {"input": 0, "output": 0},
-            }
-
-    # Truncate input to fit context window
+    router = get_router(config)
     models_cfg = config.get("models", {})
     model_cfg = models_cfg.get(model, {})
+    is_local = model_cfg.get("local", False)
+
+    # --- Local-only mode enforcement ---
+    if router.is_local_only_mode() and not is_local:
+        return {
+            "error": "Local-only mode: cloud models disabled",
+            "model": model,
+            "content": None,
+            "usage": {"input": 0, "output": 0},
+        }
+
+    # --- Get provider and resolve routing ---
+    provider = router.get_provider(model)
+    model_id = router.get_model_id(model)
+
+    # Check provider availability
+    if not is_local and not provider.is_available():
+        return {
+            "error": f"Provider {provider.name} not available (missing API key or disabled)",
+            "model": model,
+            "content": None,
+            "usage": {"input": 0, "output": 0},
+        }
+
+    # --- Truncate input to fit context window ---
     context_window = model_cfg.get("context_window", 128000)
     combined_input = system_prompt + "\n" + user_prompt
     truncated_input = truncate_to_context_window(combined_input, context_window, reserve_output=max_tokens)
     if len(combined_input) > (context_window - max_tokens) * 4:
         user_prompt = truncated_input[len(system_prompt) + 1:]
 
-    # Resolve retry policy
+    # --- Resolve retry policy ---
     if retry_policy is None:
         retry_policy = RetryPolicy.from_config(config)
 
-    # Determine provider from model name for circuit breaker
-    provider = model.split(":")[0] if ":" in model else "default"
+    # Determine provider name for circuit breaker
+    provider_name = provider.name
 
-    # Native Ollama /api/chat endpoint
-    url = f"{base_url.rstrip('/')}/api/chat"
-    headers = {"Content-Type": "application/json"}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
+    # --- Build URL and headers using provider adapter ---
+    url = provider.build_url()
+    headers = provider.build_headers()
 
-    # Thinking models (gemma4) need more num_predict because thinking tokens
-    # count toward the limit. Double the budget for thinking models.
+    # --- Build payload using provider adapter ---
+    json_mode_models = (
+        "gemma4:e2b", "gemma4:e4b", "qwen3.5:9b", "gemma3:12b",
+        "granite3.3:8b", "phi4-mini:3.8b",
+    )
+    json_mode = not is_local or model in json_mode_models
+
+    # Thinking models need more num_predict
     effective_num_predict = max_tokens
     if model.startswith("gemma4:"):
         effective_num_predict = max_tokens * 2
+
+    num_ctx = config.get("execution", {}).get("local_num_ctx", 8192) if is_local else 32768
+
+    payload = provider.build_payload(
+        model_id=model_id,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        temperature=temperature,
+        max_tokens=effective_num_predict,
+        num_ctx=num_ctx,
+        json_mode=json_mode,
+    )
 
     last_error = None
 
@@ -330,46 +383,22 @@ def call_ollama(config: dict, model: str, system_prompt: str, user_prompt: str,
         if hat_id and not _circuit_breakers.allow_request("hat", hat_id):
             last_error = f"Circuit breaker OPEN for hat {hat_id}"
             break
-        if not _circuit_breakers.allow_request("provider", provider):
-            last_error = f"Circuit breaker OPEN for provider {provider}"
+        if not _circuit_breakers.allow_request("provider", provider_name):
+            last_error = f"Circuit breaker OPEN for provider {provider_name}"
             break
-
-        # Native Ollama /api/chat payload format
-        payload = {
-            "model": model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            "stream": False,
-            "options": {
-                "temperature": temperature,
-                "num_predict": effective_num_predict,
-                "num_ctx": config.get("execution", {}).get("local_num_ctx", 8192) if is_local else 32768,
-            },
-        }
-
-        # Use Ollama format="json" for JSON mode — works on all models
-        # that support it. All local models in our pool handle JSON mode.
-        json_mode_models = (
-            "gemma4:e2b", "gemma4:e4b", "qwen3.5:9b", "gemma3:12b",
-            "granite3.3:8b", "phi4-mini:3.8b",
-        )
-        if not is_local or model in json_mode_models:
-            payload["format"] = "json"
 
         try:
             resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
 
             if resp.status_code in (429, 500, 502, 503, 504):
                 error_msg = f"HTTP {resp.status_code}: {resp.text[:200]}"
-                _circuit_breakers.record_failure("provider", provider)
+                _circuit_breakers.record_failure("provider", provider_name)
                 if hat_id:
                     _circuit_breakers.record_failure("hat", hat_id)
                 if attempt < retry_policy.max_attempts - 1 and retry_policy.is_retryable_error(error_msg):
                     backoff = retry_policy.compute_backoff(attempt)
-                    print(f"  ⚠️ Retry {attempt + 1}/{retry_policy.max_attempts} for {model}: "
-                          f"{error_msg} (backoff {backoff:.1f}s)", file=sys.stderr)
+                    print(f"  Warning: Retry {attempt + 1}/{retry_policy.max_attempts} for {model} "
+                          f"via {provider_name}: {error_msg} (backoff {backoff:.1f}s)", file=sys.stderr)
                     time.sleep(backoff)
                     last_error = error_msg
                     continue
@@ -383,37 +412,31 @@ def call_ollama(config: dict, model: str, system_prompt: str, user_prompt: str,
             resp.raise_for_status()
             data = resp.json()
 
-            # Native /api/chat response format: message.content at top level
-            message = data.get("message", {})
-            content = message.get("content", "")
-            # Thinking models put reasoning in message.thinking
-            thinking = message.get("thinking", "")
+            # --- Parse response using provider adapter ---
+            parsed = provider.parse_response(data)
 
             # Record success
-            _circuit_breakers.record_success("provider", provider)
+            _circuit_breakers.record_success("provider", provider_name)
             if hat_id:
                 _circuit_breakers.record_success("hat", hat_id)
 
             return {
                 "error": None,
                 "model": model,
-                "content": content,
-                "thinking": thinking if thinking else None,
-                "usage": {
-                    "input": data.get("prompt_eval_count", 0),
-                    "output": data.get("eval_count", 0),
-                },
+                "content": parsed["content"],
+                "thinking": parsed.get("thinking"),
+                "usage": parsed["usage"],
             }
 
         except requests.exceptions.Timeout:
             error_msg = f"Timeout after {timeout}s"
-            _circuit_breakers.record_failure("provider", provider)
+            _circuit_breakers.record_failure("provider", provider_name)
             if hat_id:
                 _circuit_breakers.record_failure("hat", hat_id)
             if attempt < retry_policy.max_attempts - 1 and retry_policy.is_retryable_error(error_msg):
                 backoff = retry_policy.compute_backoff(attempt)
-                print(f"  ⚠️ Retry {attempt + 1}/{retry_policy.max_attempts} for {model}: "
-                      f"{error_msg} (backoff {backoff:.1f}s)", file=sys.stderr)
+                print(f"  Warning: Retry {attempt + 1}/{retry_policy.max_attempts} for {model} "
+                      f"via {provider_name}: {error_msg} (backoff {backoff:.1f}s)", file=sys.stderr)
                 time.sleep(backoff)
                 last_error = error_msg
                 continue
@@ -426,13 +449,13 @@ def call_ollama(config: dict, model: str, system_prompt: str, user_prompt: str,
 
         except requests.exceptions.RequestException as exc:
             error_msg = str(exc)
-            _circuit_breakers.record_failure("provider", provider)
+            _circuit_breakers.record_failure("provider", provider_name)
             if hat_id:
                 _circuit_breakers.record_failure("hat", hat_id)
             if attempt < retry_policy.max_attempts - 1 and retry_policy.is_retryable_error(error_msg):
                 backoff = retry_policy.compute_backoff(attempt)
-                print(f"  ⚠️ Retry {attempt + 1}/{retry_policy.max_attempts} for {model}: "
-                      f"{error_msg} (backoff {backoff:.1f}s)", file=sys.stderr)
+                print(f"  Warning: Retry {attempt + 1}/{retry_policy.max_attempts} for {model} "
+                      f"via {provider_name}: {error_msg} (backoff {backoff:.1f}s)", file=sys.stderr)
                 time.sleep(backoff)
                 last_error = error_msg
                 continue
@@ -450,6 +473,10 @@ def call_ollama(config: dict, model: str, system_prompt: str, user_prompt: str,
         "content": None,
         "usage": {"input": 0, "output": 0},
     }
+
+
+# Set the alias after definition
+call_llm = call_ollama
 
 
 # ---------------------------------------------------------------------------
@@ -519,23 +546,38 @@ def build_comparable_model_sequence(
     primary_model: str,
     fallback_model: str | None = None,
     local_only: bool = False,
+    cross_provider: bool = True,
 ) -> list[str]:
     """Build a prioritized model fallback list using comparable configured tiers.
 
     If local_only=True, only include models marked as local in the config.
+    If cross_provider=True, include same-tier models from other providers as fallbacks.
     """
     models_cfg = config.get("models", {})
     has_cloud_key = bool(os.environ.get("OLLAMA_API_KEY", "").strip())
+
+    # Check for global local-only mode
+    router = None
+    try:
+        router = get_router(config)
+    except Exception:
+        pass
+    if router and router.is_local_only_mode():
+        local_only = True
 
     seen = set()
     ordered_models = []
 
     def add(model_name: str | None):
         if model_name and model_name in models_cfg and model_name not in seen:
+            model_cfg_item = models_cfg[model_name]
             # Skip cloud models when local_only or no API key
             if local_only or not has_cloud_key:
-                if not models_cfg[model_name].get("local", False):
+                if not model_cfg_item.get("local", False):
                     return
+            # Skip models whose provider is not available
+            if not _has_available_provider(config, model_name):
+                return
             ordered_models.append(model_name)
             seen.add(model_name)
 
@@ -545,6 +587,7 @@ def build_comparable_model_sequence(
     primary_tier = models_cfg.get(primary_model, {}).get("tier")
     fallback_tier = models_cfg.get(fallback_model, {}).get("tier") if fallback_model else None
 
+    # Same-tier models (any provider)
     for model_name, model_meta in models_cfg.items():
         if model_meta.get("tier") == primary_tier:
             add(model_name)
@@ -554,6 +597,7 @@ def build_comparable_model_sequence(
             if model_meta.get("tier") == fallback_tier:
                 add(model_name)
 
+    # All remaining models
     for model_name in models_cfg:
         add(model_name)
 
@@ -681,7 +725,13 @@ class ConcurrencyCoordinator:
 
         Dual-mode hats (Black, Purple, Brown) use local models when sensitive_mode is True.
         Tier 4 hats (White, Blue, Silver, Teal) are always local.
+        Global local_only mode forces all hats to local.
         """
+        # Local-only mode enforcement
+        local_only_cfg = config.get("local_only", {})
+        if local_only_cfg.get("enabled", False):
+            return "local"
+
         hat_def = config["hats"][hat_id]
         model = hat_def["primary_model"]
         models_cfg = config.get("models", {})
@@ -730,37 +780,60 @@ class ConcurrencyCoordinator:
 # ---------------------------------------------------------------------------
 
 def preflight_check(config: dict | None = None, requested_hats: list[str] | None = None) -> list[str]:
-    """Check that required environment is configured.
+    """Check that required environment is configured for all providers.
 
     Returns a list of warning/error messages. Empty list = all good.
-    If config is provided, only requires OLLAMA_API_KEY when cloud models are needed.
+    If config is provided, only requires API keys when cloud models are needed.
     If requested_hats is provided, only checks models for those specific hats.
     """
     issues = []
 
-    api_key = os.environ.get("OLLAMA_API_KEY", "").strip()
+    # Check local-only mode
+    local_only_cfg = config.get("local_only", {}) if config else {}
+    if local_only_cfg.get("enabled", False):
+        issues.append("INFO: Local-only mode is ENABLED. Cloud models will not be used.")
 
-    # Determine which hats will actually run
+    # Check all configured providers
+    providers_cfg = config.get("providers", {}) if config else {}
+    for provider_name, provider_cfg in providers_cfg.items():
+        if not provider_cfg.get("enabled", True):
+            continue
+        api_key_env = provider_cfg.get("api_key_env", "")
+        if api_key_env:
+            api_key = os.environ.get(api_key_env, "").strip()
+            if not api_key:
+                issues.append(
+                    f"WARNING: {api_key_env} is not set. "
+                    f"Models using provider '{provider_name}' will fail."
+                )
+
+    # Legacy check: if no providers section, check OLLAMA_API_KEY
+    if not providers_cfg:
+        api_key = os.environ.get("OLLAMA_API_KEY", "").strip()
+        # Determine which hats will actually run
+        hats_cfg = config.get("hats", {}) if config else {}
+        if requested_hats:
+            active_hats = {k: v for k, v in hats_cfg.items() if k in requested_hats}
+        else:
+            active_hats = hats_cfg
+
+        needs_cloud = any(not h.get("local_only", False) for h in active_hats.values()) if active_hats else True
+        if not api_key and needs_cloud:
+            issues.append(
+                "WARNING: OLLAMA_API_KEY is not set.\n"
+                "   Cloud models will fail and fall back to local models.\n"
+                "   For full cloud model support, set your key:\n"
+                "     GitHub Actions: Add as Repository Secret\n"
+                "     Local: Copy .env.example to .env and fill in your key\n"
+                "     Get a key at: https://ollama.com/settings/keys"
+            )
+
+    # Check if any active hats need local models
     hats_cfg = config.get("hats", {}) if config else {}
     if requested_hats:
         active_hats = {k: v for k, v in hats_cfg.items() if k in requested_hats}
     else:
         active_hats = hats_cfg
-
-    # Check if any active hats need cloud models
-    needs_cloud = any(not h.get("local_only", False) for h in active_hats.values()) if active_hats else True
-
-    if not api_key and needs_cloud:
-        issues.append(
-            "WARNING: OLLAMA_API_KEY is not set.\n"
-            "   Cloud models will fail and fall back to local models.\n"
-            "   For full cloud model support, set your key:\n"
-            "     GitHub Actions: Add as Repository Secret\n"
-            "     Local: Copy .env.example to .env and fill in your key\n"
-            "     Get a key at: https://ollama.com/settings/keys"
-        )
-
-    # Check if any active hats need local models
     models_cfg = config.get("models", {}) if config else {}
     active_models = set()
     for hat_cfg in active_hats.values():
@@ -785,9 +858,175 @@ def preflight_check(config: dict | None = None, requested_hats: list[str] | None
             )
 
     cloud_url = os.environ.get("OLLAMA_CLOUD_URL", "").strip()
-    if not cloud_url and needs_cloud and api_key:
+    if not cloud_url and not providers_cfg:
         issues.append(
             "OLLAMA_CLOUD_URL not set — using default: https://ollama.com"
         )
 
     return issues
+
+
+# ---------------------------------------------------------------------------
+# Model chain with fallback — shared by hats_runner and gremlin_runner
+# ---------------------------------------------------------------------------
+
+def try_model_chain(config: dict, primary: str, fallback: str | None,
+                    system_prompt: str, user_prompt: str,
+                    temperature: float, max_tokens: int, timeout: int,
+                    hat_id: str) -> dict:
+    """Try primary model, then fallback, then full tier-based chain.
+
+    Shared by hats_runner.run_hat() and gremlin_runner phases.
+    Returns the result dict from call_ollama() with the first successful model,
+    or the last error result if all models fail.
+    """
+    result = call_ollama(config, primary, system_prompt, user_prompt,
+                         temperature=temperature, max_tokens=max_tokens,
+                         timeout=timeout, hat_id=hat_id)
+
+    if not result["error"]:
+        return result
+
+    # Try fallback model
+    if fallback:
+        print(f"  Primary model {primary} failed for {hat_id}, trying fallback {fallback}",
+              file=sys.stderr)
+        result = call_ollama(config, fallback, system_prompt, user_prompt,
+                             temperature=temperature, max_tokens=max_tokens,
+                             timeout=timeout, hat_id=hat_id)
+        if not result["error"]:
+            return result
+
+    # Try full model fallback chain
+    chain = build_comparable_model_sequence(config, primary, fallback)
+    for model in chain:
+        if model == primary or model == fallback:
+            continue  # Already tried
+        print(f"  Fallback chain: trying {model} for {hat_id}", file=sys.stderr)
+        result = call_ollama(config, model, system_prompt, user_prompt,
+                             temperature=temperature, max_tokens=max_tokens,
+                             timeout=timeout, hat_id=hat_id)
+        if not result["error"]:
+            return result
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Overnight mode — larger local models, extended timeouts
+# ---------------------------------------------------------------------------
+
+def is_overnight_mode(config: dict) -> bool:
+    """Check if current time is within the overnight window.
+
+    The overnight window is configured in gremlins.overnight.schedule_start/end
+    (local timezone, 24h format like "01:00" to "07:00").
+    """
+    overnight_cfg = config.get("gremlins", {}).get("overnight", {})
+    if not overnight_cfg.get("enabled", False):
+        return False
+
+    import datetime
+    now = datetime.datetime.now()
+    start = overnight_cfg.get("schedule_start", "01:00")
+    end = overnight_cfg.get("schedule_end", "07:00")
+    start_h, start_m = map(int, start.split(":"))
+    end_h, end_m = map(int, end.split(":"))
+    start_min = start_h * 60 + start_m
+    end_min = end_h * 60 + end_m
+    now_min = now.hour * 60 + now.minute
+
+    if start_min <= end_min:
+        return start_min <= now_min < end_min
+    else:
+        # Window crosses midnight (e.g., 23:00 to 06:00)
+        return now_min >= start_min or now_min < end_min
+
+
+def get_overnight_timeout(config: dict, base_timeout: int) -> int:
+    """Scale timeout by the overnight multiplier if in overnight mode."""
+    if is_overnight_mode(config):
+        multiplier = config.get("gremlins", {}).get("overnight", {}).get("timeout_multiplier", 1)
+        return int(base_timeout * multiplier)
+    return base_timeout
+
+
+def resolve_gremlin_model(config: dict, phase: str, hat_id: str) -> str:
+    """Resolve which model a gremlin phase should use.
+
+    During overnight mode, checks gremlins.overnight.model_overrides[phase].
+    Otherwise, uses the hat's primary_model (or local_model for local_only hats).
+    """
+    hat_def = config["hats"][hat_id]
+
+    if is_overnight_mode(config):
+        overrides = config.get("gremlins", {}).get("overnight", {}).get("model_overrides", {})
+        if phase in overrides:
+            return overrides[phase]
+
+    # Default: use the hat's configured model
+    if hat_def.get("local_only"):
+        return hat_def.get("local_model", hat_def["primary_model"])
+    return hat_def["primary_model"]
+
+
+# ---------------------------------------------------------------------------
+# Wake-on-LAN — wake a standby PC before overnight runs
+# ---------------------------------------------------------------------------
+
+def send_wake_on_lan(config: dict) -> bool:
+    """Send a Wake-on-LAN magic packet to wake a standby machine.
+
+    Reads config from gremlins.overnight.wake_on_lan:
+      - enabled: bool
+      - target_mac: MAC address string (e.g., "aa:bb:cc:dd:ee:ff")
+      - broadcast_ip: broadcast address (default "255.255.255.255")
+
+    Returns True if packet was sent, False if disabled or error.
+    After sending, polls localhost:11434 to wait for Ollama readiness.
+    """
+    wol_cfg = config.get("gremlins", {}).get("overnight", {}).get("wake_on_lan", {})
+    if not wol_cfg.get("enabled", False):
+        return False
+
+    target_mac = wol_cfg.get("target_mac", "")
+    if not target_mac:
+        return False
+
+    # Parse MAC address
+    mac_bytes = bytes(int(b, 16) for b in target_mac.replace("-", ":").split(":"))
+    if len(mac_bytes) != 6:
+        print(f"  Invalid MAC address for WoL: {target_mac}", file=sys.stderr)
+        return False
+
+    # Build magic packet: 6 x 0xFF + 16 x MAC
+    magic_packet = b"\xff" * 6 + mac_bytes * 16
+
+    broadcast_ip = wol_cfg.get("broadcast_ip", "255.255.255.255")
+
+    try:
+        import socket
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        sock.sendto(magic_packet, (broadcast_ip, 9))
+        sock.close()
+        print(f"  Wake-on-LAN packet sent to {target_mac}", file=sys.stderr)
+
+        # Wait for Ollama to be ready (30s timeout)
+        local_url = os.environ.get("OLLAMA_LOCAL_URL", "http://localhost:11434")
+        deadline = time.time() + 30
+        while time.time() < deadline:
+            try:
+                resp = requests.get(f"{local_url}/api/version", timeout=3)
+                if resp.status_code == 200:
+                    print("  Ollama is ready", file=sys.stderr)
+                    return True
+            except requests.exceptions.RequestException:
+                time.sleep(3)
+
+        print("  Ollama not ready after 30s (machine may still be waking)", file=sys.stderr)
+        return True  # Packet was sent, even if Ollama isn't ready yet
+
+    except Exception as exc:
+        print(f"  Wake-on-LAN failed: {exc}", file=sys.stderr)
+        return False

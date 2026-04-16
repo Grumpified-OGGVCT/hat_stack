@@ -1,9 +1,11 @@
 /**
  * tools.ts — MCP tool definitions for Hat Stack.
  *
- * Defines the 6 tools exposed by the MCP server:
+ * Defines the 10 tools exposed by the MCP server:
  *   hats_review, hats_task, hats_list_models, hats_check_status,
- *   hats_get_config, hats_assemble_team
+ *   hats_get_config, hats_assemble_team,
+ *   gremlin_kickoff, gremlin_proposal, gremlin_herald,
+ *   moltbook_verify
  */
 
 import {
@@ -151,6 +153,104 @@ export const HAT_STACK_TOOLS: Tool[] = [
         },
       },
       required: ["task_description"],
+    },
+  },
+  // --- Gremlin tools ---
+  {
+    name: "gremlin_kickoff",
+    description:
+      "Start a Gremlin review cycle. The Gremlin Legion runs an overnight-style " +
+      "autonomous review: Scout scans changes, Strategist creates proposals, " +
+      "Analyst deep-dives, Herald writes a digest. All models are local (no cloud needed). " +
+      "Use 'scope' to run a single phase or all phases.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        scope: {
+          type: "string",
+          enum: ["all", "review", "propose", "analyze", "herald"],
+          description:
+            "Which phase to run: 'all' (default) runs all 4 phases sequentially, " +
+            "or pick a single phase.",
+          default: "all",
+        },
+      },
+    },
+  },
+  {
+    name: "gremlin_proposal",
+    description:
+      "List, approve, or reject Gremlin governance proposals. Gremlins create " +
+      "PENDING_HUMAN proposals for significant findings — these require human " +
+      "approval before the Analyst will act on them. Proposals auto-expire after 48h.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        action: {
+          type: "string",
+          enum: ["list", "approve", "reject"],
+          description: "Action: 'list' shows proposals, 'approve' approves one, 'reject' rejects one",
+        },
+        proposal_id: {
+          type: "string",
+          description: "Proposal ID (required for approve/reject, e.g., '001')",
+        },
+        reason: {
+          type: "string",
+          description: "Reason for rejection (optional, used with action='reject')",
+        },
+        status_filter: {
+          type: "string",
+          enum: ["PENDING_HUMAN", "APPROVED", "REJECTED", "EXPIRED"],
+          description: "Filter proposals by status (used with action='list')",
+        },
+      },
+      required: ["action"],
+    },
+  },
+  {
+    name: "gremlin_herald",
+    description:
+      "Read recent Herald social output. The Herald Gremlin composes human-readable " +
+      "daily digests summarizing the overnight Gremlin activity, including findings, " +
+      "pending proposals, and action items. Signed off with 👾 Gremlin Legion.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        since: {
+          type: "string",
+          description: "ISO date string — only return entries after this date (e.g., '2026-04-15')",
+        },
+      },
+    },
+  },
+  // --- Moltbook auth tool ---
+  {
+    name: "moltbook_verify",
+    description:
+      "Verify a Moltbook identity token ('Sign in with Moltbook'). " +
+      "Call POST https://moltbook.com/api/v1/agents/verify-identity with the app's " +
+      "MOLTBOOK_APP_KEY and the agent's identity token. Returns the verified agent " +
+      "profile (name, karma, owner, claim status) or an error if the token is " +
+      "invalid/expired. Audience restriction prevents token forwarding attacks.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        identity_token: {
+          type: "string",
+          description: "The Moltbook identity token to verify (from X-Moltbook-Identity header)",
+        },
+        audience: {
+          type: "string",
+          description: "Audience restriction (default: from hat_configs.yml, e.g. 'hat-stack')",
+        },
+        use_cache: {
+          type: "boolean",
+          description: "Cache verified identities for 5 minutes (default: true)",
+          default: true,
+        },
+      },
+      required: ["identity_token"],
     },
   },
 ];

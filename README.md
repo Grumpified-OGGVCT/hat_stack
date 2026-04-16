@@ -2,7 +2,7 @@
 
 **The Universal Agentic-AI Engineering Stack -- 18 Specialized Review Agents**
 
-**Version:** 3.0 · **Status:** Production-Ready · **License:** [MIT](LICENSE)
+**Version:** 3.1 · **Status:** Production-Ready · **License:** [MIT](LICENSE)
 
 Language-agnostic · Framework-agnostic · Domain-agnostic
 
@@ -12,7 +12,9 @@ Language-agnostic · Framework-agnostic · Domain-agnostic
 
 Hat Stack is a **local-first agentic review system** that runs 18 specialized AI agents (each wearing a metaphorical "hat") against your code changes. Each hat provides a distinct review lens -- security, performance, accessibility, AI safety, and more -- producing a unified, adjudicated verdict.
 
-**Local models, local machine.** Hat Stack runs on your machine using [Ollama](https://ollama.com). No cloud API keys required for the core experience. Cloud models are optional for heavier workloads.
+**Local models, local machine.** Hat Stack runs on your machine using [Ollama](https://ollama.com). No cloud API keys required for the core experience. Cloud models are optional for heavier workloads. **Local-only mode** is available for strict PII compliance.
+
+**Multi-provider.** Route cloud models through Ollama Cloud, OpenRouter, or any OpenAI-compatible API. Cross-provider fallback keeps work flowing when your primary provider has issues.
 
 > **Not every hat runs on every diff.** Only **4 hats are always-on** (Black, Blue, Purple, Gold). The remaining 14 activate when the diff matches their trigger conditions. A typical PR activates 4-8 hats.
 
@@ -76,6 +78,72 @@ ollama pull gemma4:e2b gemma4:e4b qwen3.5:9b
 
 ---
 
+## Multi-Provider LLM Routing
+
+Hat Stack supports routing models to different LLM providers. The default setup uses Ollama Local and Ollama Cloud, but you can add OpenRouter or any OpenAI-compatible API.
+
+### Configured Providers
+
+| Provider | API Format | Auth | Default |
+|----------|-----------|------|---------|
+| `ollama_local` | Ollama `/api/chat` | None | Yes (local) |
+| `ollama_cloud` | Ollama `/api/chat` | `OLLAMA_API_KEY` | Yes (cloud) |
+| `openrouter` | OpenAI `/v1/chat/completions` | `OPENROUTER_API_KEY` | No |
+
+### Adding OpenRouter
+
+1. Get an API key from [openrouter.ai](https://openrouter.ai)
+2. Set the environment variable:
+   ```bash
+   export OPENROUTER_API_KEY="sk-or-..."
+   ```
+3. In `scripts/hat_configs.yml`, set `openrouter.enabled: true`
+4. OpenRouter model equivalents (e.g., `glm-5.1:openrouter`) are already configured
+
+### Adding Other Providers (DeepInfra, Groq, Together AI)
+
+Any OpenAI-compatible API can be added with config changes only -- no code changes needed:
+
+1. Add a provider entry under `providers:` in `hat_configs.yml`:
+   ```yaml
+   providers:
+     deepinfra:
+       name: "DeepInfra"
+       base_url_env: DEEPINFRA_BASE_URL
+       default_base_url: "https://api.deepinfra.com/v1/openai"
+       api_key_env: DEEPINFRA_API_KEY
+       api_format: openai_compatible
+       enabled: true
+   ```
+2. Add models with `provider: deepinfra` and `model_id: "deepseek-ai/DeepSeek-V3"`
+3. Set the API key env var
+
+### Cross-Provider Fallback
+
+When `execution.fallback_across_providers: true` (default), if a model fails on one provider, the system tries equivalent-tier models on other available providers. This keeps work flowing even when your primary cloud provider has issues.
+
+---
+
+## Local-Only Mode
+
+For strict PII compliance, enable local-only mode to ensure **no data ever leaves your machine**:
+
+```yaml
+# In scripts/hat_configs.yml
+local_only:
+  enabled: true
+```
+
+When enabled:
+- All hats are forced to use local models
+- Cloud model calls are blocked (return errors that trigger fallback to local)
+- Dual-mode hats (Black, Purple, Brown) that would normally switch to local for sensitive content are already local
+- The GitHub Actions / CI mode still works but will only use local models (requires self-hosted runners with Ollama)
+
+**Note:** The default mode (hybrid cloud + local) still works as always. Local-only is opt-in. The original GitHub Actions CI mode using `OLLAMA_API_KEY` for cloud models continues to work unchanged.
+
+---
+
 ## Cloud Models (Optional)
 
 For heavier workloads, Hat Stack supports Ollama Cloud models. Set `OLLAMA_API_KEY` to enable:
@@ -86,6 +154,124 @@ export OLLAMA_API_KEY="your-key-from-ollama-com"
 ```
 
 Cloud models (Tier 1-4) include: glm-5.1, kimi-k2.5, deepseek-v3.2, devstral-2, minimax-m2.7, nemotron-3-super, qwen3-coder, and more. See [`scripts/hat_configs.yml`](scripts/hat_configs.yml) for the full pool.
+
+---
+
+## Gremlin Overnight Daemon
+
+The Gremlin system is Hat Stack's autonomous overnight code scanner. It runs a 4-phase review loop across all your configured repos and produces a morning Herald digest.
+
+### The 4 Phases
+
+| Phase | Time | Hat | What |
+|-------|------|-----|------|
+| Review | 2 AM | Black | Scan recent git diffs for security issues |
+| Propose | 3 AM | Gold | Synthesize findings into governance proposals |
+| Analyze | 4 AM | Purple | Deep analysis of approved proposals |
+| Herald | 5 AM | Blue | Compose cross-repo daily digest |
+
+### Multi-Repo Configuration
+
+Add repos to monitor in `scripts/hat_configs.yml`:
+
+```yaml
+gremlins:
+  repos:
+    - path: "/path/to/your/repo1"
+    - path: "/path/to/your/repo2"
+    - path: "/path/to/your/repo3"
+      skip_phases: ["herald"]    # Optional: skip specific phases
+      enabled: true               # Optional: disable without removing
+```
+
+### Daemon CLI
+
+```bash
+# Start the daemon (foreground, schedule from config)
+python scripts/gremlin_daemon.py --daemon --config scripts/hat_configs.yml
+
+# Single check-and-run cycle (testing)
+python scripts/gremlin_daemon.py --once
+
+# Show schedule + repos without executing
+python scripts/gremlin_daemon.py --dry-run
+
+# Show status, next runs, per-repo stats
+python scripts/gremlin_daemon.py --status
+
+# Stop a running daemon
+python scripts/gremlin_daemon.py --stop
+```
+
+### Schedule Configuration
+
+The cron schedule is in `hat_configs.yml`:
+
+```yaml
+gremlins:
+  overnight_schedule:
+    review:  "0 2 * * *"     # 2 AM daily
+    propose: "0 3 * * *"     # 3 AM daily
+    analyze: "0 4 * * *"     # 4 AM daily
+    herald:  "0 5 * * *"     # 5 AM daily
+```
+
+Supports standard 5-field cron syntax: `*`, ranges (`1-5`), steps (`*/15`), comma lists (`1,15,30`).
+
+### Overnight Mode
+
+During the overnight window, the daemon automatically switches to larger local models with extended timeouts:
+
+```yaml
+gremlins:
+  overnight:
+    enabled: true
+    schedule_start: "01:00"
+    schedule_end: "07:00"
+    model_overrides:
+      review: "qwen3.5:9b"
+      analyze: "qwen3.5:9b"
+      propose: "gemma3:12b"
+    timeout_multiplier: 5
+```
+
+### Windows Scheduled Task
+
+Install the daemon to start at logon:
+
+```powershell
+pwsh scripts/install-gremlin-daemon.ps1
+
+# Check status
+pwsh scripts/install-gremlin-daemon.ps1 -Status
+
+# Uninstall
+pwsh scripts/install-gremlin-daemon.ps1 -Uninstall
+```
+
+### Morning Workflow
+
+1. Check `.gremlins/herald/social_log/YYYY-MM-DD-social_log.md` for the cross-repo digest
+2. It lists findings per repo with section headers
+3. Per-repo proposals in `.gremlins/repos/<name>/proposals/` -- approve or reject
+4. `python scripts/gremlin_runner.py --status` shows a summary across all repos
+5. The Herald digest is pushed to the OpenClaw bridge automatically
+
+### Governance
+
+Proposals follow a governance lifecycle:
+- **PENDING_HUMAN** -- Created by Gremlins, awaiting your approval
+- **APPROVED** -- You approved it, analysis will run
+- **REJECTED** -- You rejected it, no further action
+- **EXPIRED** -- Not approved within 48 hours, auto-expired
+
+```bash
+# Approve a proposal
+python scripts/gremlin_runner.py --approve 001
+
+# Reject a proposal
+python scripts/gremlin_runner.py --reject 001 --reason "Too risky right now"
+```
 
 ---
 
@@ -138,7 +324,7 @@ Budget: ~8,500 tokens estimated
 
 When a diff contains credentials, API keys, or PII patterns, Hat Stack automatically switches dual-mode hats (Black, Purple, Brown) to **local models only** -- your sensitive code never leaves your machine.
 
-This is automatic. No configuration needed.
+This is automatic. No configuration needed. For full PII safety, enable **local-only mode** (see above).
 
 ---
 
@@ -222,22 +408,39 @@ Only pending (not yet completed) hats will run.
 
 ## GitHub Actions (Optional)
 
-Hat Stack also runs as GitHub Actions for CI/CD integration. See:
+Hat Stack also runs as GitHub Actions for CI/CD integration. This uses cloud models via `OLLAMA_API_KEY` as a Repository Secret. See:
 
 - [`FORK_SETUP.md`](FORK_SETUP.md) -- Fork and setup guide for GitHub Actions
 - [`.github/workflows/`](.github/workflows/) -- Reusable workflows, dispatch handler, task runner
 - `OLLAMA_API_KEY` -- Required as a Repository Secret for cloud models in CI
+
+**GitHub Actions mode works unchanged.** The hybrid cloud+local mode is the default. Local-only mode is opt-in. For CI with local-only, use self-hosted runners with Ollama installed.
+
+---
+
+## Environment Variables Reference
+
+| Variable | Provider | Required | Description |
+|----------|----------|----------|-------------|
+| `OLLAMA_LOCAL_URL` | ollama_local | No | Local Ollama URL (default: `http://localhost:11434`) |
+| `OLLAMA_CLOUD_URL` | ollama_cloud | No | Ollama Cloud URL (default: `https://ollama.com`) |
+| `OLLAMA_API_KEY` | ollama_cloud | For cloud | Ollama Cloud API key |
+| `OPENROUTER_API_KEY` | openrouter | For OpenRouter | OpenRouter API key |
+| `OPENROUTER_BASE_URL` | openrouter | No | OpenRouter base URL (default: `https://openrouter.ai/api/v1`) |
+| `DEEPINFRA_API_KEY` | deepinfra | For DeepInfra | DeepInfra API key |
+| `GROQ_API_KEY` | groq | For Groq | Groq API key |
+| `TOGETHER_API_KEY` | together | For Together AI | Together AI API key |
 
 ---
 
 ## Architecture
 
 ```
-Layer 5: CLI / MCP Server / IDE Extension / CI/CD Trigger
+Layer 5: CLI / MCP Server / IDE Extension / CI/CD Trigger / Gremlin Daemon
 Layer 4: Conductor -- Hat Selector, Gate Engine, Retry, State Manager, Consolidator, CoVE
 Layer 3: 18 Hat Agents -- each with dedicated persona + model
-Layer 2: MCP (Tool Integration) / A2A (Agent-to-Agent)
-Layer 1: Ollama (Local + Cloud) / Vector Stores / Key-Value Stores
+Layer 2: Provider Router -- Ollama / OpenRouter / DeepInfra / Groq / Together AI / ...
+Layer 1: Ollama (Local + Cloud) / OpenAI-Compatible APIs / Vector Stores / Key-Value Stores
 ```
 
 ---
@@ -250,7 +453,7 @@ Layer 1: Ollama (Local + Cloud) / Vector Stores / Key-Value Stores
 | [`SPEC.md`](SPEC.md) | Primary specification -- orchestration, gates, retry, HITL, CI/CD |
 | [`CATALOG.md`](CATALOG.md) | Master Hat Registry -- triggers, severity grading, risk scores |
 | [`hats/`](hats/) | Individual hat specifications |
-| [`scripts/hat_configs.yml`](scripts/hat_configs.yml) | Model pool and hat-to-model configuration |
+| [`scripts/hat_configs.yml`](scripts/hat_configs.yml) | Model pool, providers, and hat configuration |
 | [`.env.example`](.env.example) | Environment variable template |
 
 ---
@@ -262,12 +465,18 @@ hat_stack/
   scripts/
     hats_runner.py           Review orchestrator (Conductor)
     hats_task_runner.py       Task orchestrator (generate, refactor, plan, etc.)
-    hats_common.py            Shared library: call_ollama, retry, circuit breaker, concurrency
+    hats_common.py            Shared library: multi-provider call_ollama, retry, circuit breaker
+    provider_router.py        Multi-provider LLM routing (Ollama, OpenRouter, OpenAI-compatible)
     hat_selector.py           Hat selection engine (keyword + AST + dependency)
     gates.py                  Gate engine (cost, security, consistency, timeout, decision)
     consolidator.py           Finding deduplication and conflict detection
     state.py                  Run state persistence and checkpoint resume
-    hat_configs.yml           Model pool and hat configuration
+    gremlin_runner.py         Multi-repo overnight Gremlin phase executor
+    gremlin_daemon.py         Self-scheduling daemon with cron parser
+    gremlin_memory.py         .gremlins/ directory management (per-repo storage)
+    herald_bridge.py          Push Herald digests to external channels
+    hat_configs.yml           Model pool, providers, and hat configuration
+    install-gremlin-daemon.ps1  Windows Scheduled Task installer
     tests/                    Unit and integration tests
   mcp/
     src/                      MCP server source (TypeScript)

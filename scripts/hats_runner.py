@@ -39,6 +39,7 @@ from hats_common import (
     estimate_cost,
     truncate_to_context_window,
     preflight_check,
+    try_model_chain,
     ConcurrencyCoordinator,
     RetryPolicy,
     DEFAULT_CONFIG,
@@ -132,16 +133,16 @@ def run_hat(config: dict, hat_id: str, diff_text: str, context: str = "",
     if coordinator and hat_type == "local":
         # Acquire local model slot (only 1 local model at a time)
         with coordinator.local_queue:
-            result = _try_model_chain(config, model, fallback, system_prompt, user_prompt,
-                                      temperature, max_tokens, timeout, hat_id)
+            result = try_model_chain(config, model, fallback, system_prompt, user_prompt,
+                                    temperature, max_tokens, timeout, hat_id)
     elif coordinator and hat_type == "cloud":
         # Cloud models run in the cloud pool (up to 4 parallel)
-        result = _try_model_chain(config, model, fallback, system_prompt, user_prompt,
-                                  temperature, max_tokens, timeout, hat_id)
+        result = try_model_chain(config, model, fallback, system_prompt, user_prompt,
+                                temperature, max_tokens, timeout, hat_id)
     else:
         # No coordinator (legacy / simple mode)
-        result = _try_model_chain(config, model, fallback, system_prompt, user_prompt,
-                                  temperature, max_tokens, timeout, hat_id)
+        result = try_model_chain(config, model, fallback, system_prompt, user_prompt,
+                                temperature, max_tokens, timeout, hat_id)
 
     elapsed = time.time() - start
 
@@ -193,43 +194,6 @@ def run_hat(config: dict, hat_id: str, diff_text: str, context: str = "",
         report["error"] = report.get("error") or f"Timeout after {timeout_gate['timeout_limit']}s"
 
     return report
-
-
-def _try_model_chain(config: dict, primary: str, fallback: str | None,
-                     system_prompt: str, user_prompt: str,
-                     temperature: float, max_tokens: int, timeout: int,
-                     hat_id: str) -> dict:
-    """Try primary model, then fallback chain if primary fails."""
-    result = call_ollama(config, primary, system_prompt, user_prompt,
-                         temperature=temperature, max_tokens=max_tokens,
-                         timeout=timeout, hat_id=hat_id)
-
-    if not result["error"]:
-        return result
-
-    # Try fallback model
-    if fallback:
-        print(f"  Primary model {primary} failed for {hat_id}, trying fallback {fallback}",
-              file=sys.stderr)
-        result = call_ollama(config, fallback, system_prompt, user_prompt,
-                             temperature=temperature, max_tokens=max_tokens,
-                             timeout=timeout, hat_id=hat_id)
-        if not result["error"]:
-            return result
-
-    # Try full model fallback chain
-    chain = build_comparable_model_sequence(config, primary, fallback)
-    for model in chain:
-        if model == primary or model == fallback:
-            continue  # Already tried
-        print(f"  Fallback chain: trying {model} for {hat_id}", file=sys.stderr)
-        result = call_ollama(config, model, system_prompt, user_prompt,
-                             temperature=temperature, max_tokens=max_tokens,
-                             timeout=timeout, hat_id=hat_id)
-        if not result["error"]:
-            return result
-
-    return result
 
 
 # ---------------------------------------------------------------------------

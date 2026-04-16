@@ -1,9 +1,11 @@
 /**
  * tools.ts — MCP tool definitions for Hat Stack.
  *
- * Defines the 6 tools exposed by the MCP server:
+ * Defines the 10 tools exposed by the MCP server:
  *   hats_review, hats_task, hats_list_models, hats_check_status,
- *   hats_get_config, hats_assemble_team
+ *   hats_get_config, hats_assemble_team,
+ *   gremlin_kickoff, gremlin_proposal, gremlin_herald,
+ *   moltbook_verify
  */
 import { ListToolsResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 export declare const HAT_STACK_TOOLS: Tool[];
