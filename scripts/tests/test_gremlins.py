@@ -110,8 +110,8 @@ def test_phase_to_hat_mapping():
     phase_to_hat = config["gremlins"]["phase_to_hat"]
     assert phase_to_hat is not None
 
-    # All 4 phases should be mapped
-    expected_phases = {"review", "propose", "analyze", "herald"}
+    # All 6 phases should be mapped
+    expected_phases = {"catalog", "review", "propose", "analyze", "herald", "experiment"}
     assert set(phase_to_hat.keys()) == expected_phases
 
     # Each mapped hat should exist in the hats config
@@ -120,10 +120,12 @@ def test_phase_to_hat_mapping():
         assert hat_id in hats_cfg, f"Phase '{phase}' maps to hat '{hat_id}' which doesn't exist in hats config"
 
     # Verify the specific mappings
+    assert phase_to_hat["catalog"] == "cyan"
     assert phase_to_hat["review"] == "black"
     assert phase_to_hat["propose"] == "gold"
     assert phase_to_hat["analyze"] == "purple"
     assert phase_to_hat["herald"] == "blue"
+    assert phase_to_hat["experiment"] == "green"
     print("OK: phase_to_hat mapping is correct")
 
 
@@ -151,8 +153,8 @@ def test_overnight_schedule_dict_format():
     schedule = config["gremlins"]["overnight_schedule"]
     assert isinstance(schedule, dict), "overnight_schedule should be a dict"
 
-    # All 4 phases should have cron entries
-    for phase in ("review", "propose", "analyze", "herald"):
+    # All 6 phases should have cron entries
+    for phase in ("catalog", "review", "propose", "analyze", "herald", "experiment"):
         assert phase in schedule, f"overnight_schedule missing phase '{phase}'"
         cron = schedule[phase]
         # Basic cron validation: 5 fields

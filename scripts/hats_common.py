@@ -37,6 +37,147 @@ DEFAULT_CONFIG = SCRIPT_DIR / "hat_configs.yml"
 
 
 # ---------------------------------------------------------------------------
+# Skill-aware context loading
+# ---------------------------------------------------------------------------
+
+def _resolve_skills_dir(config: dict | None = None) -> Path:
+    """Resolve the skills directory from config or environment.
+
+    Resolution order:
+    1. config['gremlins']['experiment']['skills_dir'] — can be relative to hat_stack root
+    2. HAT_STACK_SKILLS_DIR environment variable
+    3. ./skills relative to hat_stack scripts directory
+    4. Fallback: sibling _universal_skills directory
+    """
+    # Check config first
+    if config:
+        skills_dir_cfg = config.get("gremlins", {}).get("experiment", {}).get("skills_dir")
+        if skills_dir_cfg:
+            skills_path = Path(skills_dir_cfg)
+            if not skills_path.is_absolute():
+                # Relative path — resolve from hat_stack root (parent of scripts/)
+                skills_path = (SCRIPT_DIR.parent / skills_path).resolve()
+            if skills_path.exists():
+                return skills_path
+
+    # Check environment variable
+    env_dir = os.environ.get("HAT_STACK_SKILLS_DIR", "")
+    if env_dir:
+        env_path = Path(env_dir)
+        if env_path.exists():
+            return env_path
+
+    # Check ./skills symlink/directory relative to hat_stack root
+    default_path = (SCRIPT_DIR.parent / "skills").resolve()
+    if default_path.exists():
+        return default_path
+
+    # Fallback: sibling _universal_skills directory
+    fallback_path = (SCRIPT_DIR.parent / "_universal_skills").resolve()
+    if fallback_path.exists():
+        return fallback_path
+
+    # Last resort: return the default path (will be empty, won't crash)
+    return default_path
+
+
+def load_skill_context(changed_files: list[str], config: dict | None = None,
+                       max_skills: int = 5, max_context_chars: int = 3000) -> str:
+    """Load SKILL.md context for skills touched by the diff.
+
+    When a diff changes files in _universal_skills/ directories, this function
+    loads the relevant SKILL.md files and returns a context string that can be
+    prepended to hat review prompts.
+
+    Args:
+        changed_files: List of file paths from the diff
+        config: Hat config dict (used to resolve skills_dir)
+        max_skills: Maximum number of skill contexts to load
+        max_context_chars: Maximum total context length in characters
+
+    Returns:
+        Formatted context string with skill descriptions, or empty string
+    """
+    skills_dir = _resolve_skills_dir(config)
+    if not skills_dir.exists():
+        return ""
+
+    skill_contexts = []
+    seen_skills = set()
+
+    for filepath in changed_files:
+        # Detect if the file is inside a skill directory
+        parts = Path(filepath).parts
+        try:
+            skills_idx = parts.index("_universal_skills")
+            if skills_idx + 1 < len(parts):
+                skill_name = parts[skills_idx + 1]
+            else:
+                continue
+        except (ValueError, IndexError):
+            # Not inside _universal_skills — skip
+            continue
+
+        if skill_name in seen_skills:
+            continue
+        seen_skills.add(skill_name)
+
+        skill_md = skills_dir / skill_name / "SKILL.md"
+        if not skill_md.exists():
+            continue
+
+        try:
+            content = skill_md.read_text(encoding="utf-8", errors="replace")
+        except (OSError, UnicodeDecodeError):
+            continue
+
+        # Extract just the description and key sections (not the whole file)
+        lines = content.split("\n")
+        description = ""
+        in_section = False
+        section_content = []
+        key_sections = []
+
+        for line in lines:
+            if line.startswith("# ") and not description:
+                # Title line
+                description = line[2:].strip()
+            elif line.startswith("## Overview") or line.startswith("## Purpose") or line.startswith("## When To Use"):
+                in_section = True
+                section_content = [line]
+            elif line.startswith("## ") and in_section:
+                key_sections.append("\n".join(section_content[:5]))
+                section_content = []
+                in_section = line.startswith("## When To Use") or line.startswith("## Core Workflows")
+            elif in_section:
+                section_content.append(line)
+
+        if section_content:
+            key_sections.append("\n".join(section_content[:5]))
+
+        context_entry = f"### Skill: {skill_name}\n**{description}**\n"
+        if key_sections:
+            context_entry += "\n".join(key_sections[:2]) + "\n"
+
+        skill_contexts.append(context_entry)
+
+        if len(skill_contexts) >= max_skills:
+            break
+
+    if not skill_contexts:
+        return ""
+
+    header = "## Relevant Skills Context\nThe following skills are directly affected by this diff:\n\n"
+    context = header + "\n".join(skill_contexts)
+
+    # Truncate to max context length
+    if len(context) > max_context_chars:
+        context = context[:max_context_chars] + "\n... (truncated)"
+
+    return context
+
+
+# ---------------------------------------------------------------------------
 # Shared type definitions
 # ---------------------------------------------------------------------------
 

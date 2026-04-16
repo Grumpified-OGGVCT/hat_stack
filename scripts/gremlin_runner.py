@@ -64,9 +64,12 @@ from moltbook_auth import (
 )
 from hat_selector import select_hats
 from gates import gate_governance
+from skills_crawler import phase_catalog
+from experiment_graph import phase_experiment
 
 __all__ = [
     "phase_review", "phase_propose", "phase_analyze", "phase_herald",
+    "phase_catalog", "phase_experiment",
     "show_status", "_resolve_phase_hat",
 ]
 
@@ -111,7 +114,10 @@ Sign off with: -- Gremlin Legion
 def _resolve_phase_hat(config: dict, phase: str) -> str:
     """Resolve which hat a gremlin phase uses."""
     phase_to_hat = config.get("gremlins", {}).get("phase_to_hat", {})
-    default_map = {"review": "black", "propose": "gold", "analyze": "purple", "herald": "blue"}
+    default_map = {
+        "catalog": "cyan", "review": "black", "propose": "gold",
+        "analyze": "purple", "herald": "blue", "experiment": "green",
+    }
     return phase_to_hat.get(phase, default_map.get(phase, "blue"))
 
 
@@ -698,7 +704,7 @@ def main():
         help="Run all 4 phases sequentially"
     )
     parser.add_argument(
-        "--phase", choices=["review", "propose", "analyze", "herald"],
+        "--phase", choices=["catalog", "review", "propose", "analyze", "herald", "experiment"],
         help="Run a single phase"
     )
     parser.add_argument(
@@ -817,14 +823,16 @@ def main():
 
     # Run phases
     phases = {
+        "catalog": phase_catalog,
         "review": phase_review,
         "propose": phase_propose,
         "analyze": phase_analyze,
         "herald": phase_herald,
+        "experiment": phase_experiment,
     }
 
     if args.all:
-        order = ["review", "propose", "analyze", "herald"]
+        order = ["catalog", "review", "propose", "analyze", "herald", "experiment"]
     else:
         order = [args.phase]
 
@@ -834,7 +842,7 @@ def main():
         hat_id = _resolve_phase_hat(config, phase_name)
         print(f"\nGremlin Phase: {phase_name.upper()} ({hat_id} hat)", file=sys.stderr)
         phase_fn = phases[phase_name]
-        if phase_name == "review":
+        if phase_name in ("review", "catalog", "experiment"):
             result = phase_fn(config, gremlins_root, since=since)
         else:
             result = phase_fn(config, gremlins_root)

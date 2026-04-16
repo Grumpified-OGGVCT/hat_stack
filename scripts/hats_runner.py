@@ -43,6 +43,7 @@ from hats_common import (
     ConcurrencyCoordinator,
     RetryPolicy,
     DEFAULT_CONFIG,
+    load_skill_context,
 )
 from gates import (
     gate_cost_budget,
@@ -362,6 +363,16 @@ def run_pipeline(diff_text: str, config: dict, requested_hats: list[str] | None 
     if sensitive_mode:
         print("SENSITIVE MODE: credential/PII content detected. "
               "Dual-mode hats will use local models.", file=sys.stderr)
+
+    # Step 2.5: Load skill context if diff touches _universal_skills
+    skill_context = load_skill_context(changed_files, config=config)
+    if skill_context:
+        print("SKILL CONTEXT: Diff touches skill directories — "
+              "loading relevant SKILL.md context", file=sys.stderr)
+        if context:
+            context = skill_context + "\n\n" + context
+        else:
+            context = skill_context
 
     # Step 3: Cost Budget Gate (G1) — block or trim, not silently continue
     diff_tokens = len(diff_text) // 4

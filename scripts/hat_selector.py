@@ -108,6 +108,51 @@ _KEYWORD_HAT_MAP = {
         r"\btest\b", r"\bspec\b", r"\bassert\b", r"\bexpect\b",
         r"\bmock\b", r"\bfixture\b", r"\bbenchmark\b", r"\bcoverage\b",
     ],
+    # Coral Hat — Product & User Value (always-on, triggers for emphasis)
+    "coral": [
+        r"\bfeature\b", r"\buser\b", r"\bcustomer\b", r"\bworkflow\b",
+        r"\bonboard\b", r"\bux\b", r"\bexperience\b", r"\bjourney\b",
+    ],
+    # Maroon Hat — Compliance & Regulation
+    "maroon": [
+        r"\bsoc.?2\b", r"\bhipaa\b", r"\bgdpr\b", r"\baudit\b",
+        r"\bcompliance\b", r"\bpolicy\b", r"\bpci.?dss\b", r"\bregulation\b",
+        r"\bconsent\b", r"\bretention\b",
+    ],
+    # Amber Hat — Documentation Quality
+    "amber": [
+        r"\breadme\b", r"\bdocs\b", r"\bchangelog\b", r"\bdocstring\b",
+        r"\bdocumentation\b", r"\bguide\b", r"\btutorial\b",
+    ],
+    # Rose Hat — Performance Engineering
+    "rose": [
+        r"\bbenchmark\b", r"\bload.?test\b", r"\bperf\b", r"\blatency\b",
+        r"\bthroughput\b", r"\bcache\b", r"\boptimization\b", r"\bprofile\b",
+        r"\bflamegraph\b", r"\bp99\b",
+    ],
+    # Sage Hat — Data Engineering
+    "sage": [
+        r"\bmigration\b", r"\bschema\b", r"\betl\b", r"\bpipeline\b",
+        r"\bsql\b", r"\bdatabase\b", r"\bwarehouse\b", r"\bseed\b",
+        r"\bprisma\b", r"\btable\b", r"\bcolumn\b", r"\bindex\b",
+    ],
+    # Lavender Hat — UX Research
+    "lavender": [
+        r"\bcomponent\b", r"\bux\b", r"\blayout\b", r"\bstyle\b",
+        r"\bresponsive\b", r"\banimation\b", r"\bdesign.?system\b",
+    ],
+    # Crimson Hat — Cost & Economics
+    "crimson": [
+        r"\bpricing\b", r"\bbilling\b", r"\bcost\b", r"\bbudget\b",
+        r"\bsubscription\b", r"\binvoice\b", r"\bmeter\b", r"\busage\b",
+        r"\brate\b", r"\bquota\b", r"\bstripe\b", r"\bpayment\b",
+    ],
+    # Plum Hat — Integration Testing
+    "plum": [
+        r"\bapi\b", r"\bendpoint\b", r"\bcontract\b", r"\bswagger\b",
+        r"\bopenapi\b", r"\bintegration\b", r"\be2e\b", r"\bservice\b",
+        r"\bwire\b", r"\bmock.?server\b", r"\bfixture\b",
+    ],
 }
 
 
@@ -140,17 +185,22 @@ _DEPENDENCY_FILES = {
 _EXTENSION_HAT_MAP = {
     ".py": ["chartreuse", "white", "gray"],
     ".ts": ["chartreuse", "azure", "teal"],
-    ".tsx": ["teal", "chartreuse"],
+    ".tsx": ["teal", "chartreuse", "lavender"],
     ".js": ["chartreuse", "azure", "teal"],
-    ".jsx": ["teal", "chartreuse"],
+    ".jsx": ["teal", "chartreuse", "lavender"],
     ".go": ["chartreuse", "white", "gray"],
     ".rs": ["chartreuse", "white", "gray"],
-    ".sql": ["white", "brown", "gray"],
+    ".sql": ["white", "brown", "gray", "sage"],
     ".yml": ["orange", "blue"],
     ".yaml": ["orange", "blue"],
-    ".md": ["blue", "silver"],
+    ".md": ["blue", "silver", "amber"],
+    ".rst": ["amber"],
+    ".adoc": ["amber"],
+    ".css": ["teal", "lavender"],
+    ".scss": ["teal", "lavender"],
     ".env": ["black", "brown"],
     ".tf": ["orange", "steel"],
+    ".prisma": ["sage"],
 }
 
 

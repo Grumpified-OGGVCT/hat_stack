@@ -1,6 +1,6 @@
 # Hat Stack
 
-**The Universal Agentic-AI Engineering Stack -- 18 Specialized Review Agents**
+**The Universal Agentic-AI Engineering Stack -- 26 Specialized Review Agents**
 
 **Version:** 3.1 · **Status:** Production-Ready · **License:** [MIT](LICENSE)
 
@@ -10,13 +10,13 @@ Language-agnostic · Framework-agnostic · Domain-agnostic
 
 ## What Is Hat Stack?
 
-Hat Stack is a **local-first agentic review system** that runs 18 specialized AI agents (each wearing a metaphorical "hat") against your code changes. Each hat provides a distinct review lens -- security, performance, accessibility, AI safety, and more -- producing a unified, adjudicated verdict.
+Hat Stack is a **local-first agentic review system** that runs 26 specialized AI agents (each wearing a metaphorical "hat") against your code changes. Each hat provides a distinct review lens -- security, performance, accessibility, AI safety, compliance, cost, and more -- producing a unified, adjudicated verdict.
 
 **Local models, local machine.** Hat Stack runs on your machine using [Ollama](https://ollama.com). No cloud API keys required for the core experience. Cloud models are optional for heavier workloads. **Local-only mode** is available for strict PII compliance.
 
 **Multi-provider.** Route cloud models through Ollama Cloud, OpenRouter, or any OpenAI-compatible API. Cross-provider fallback keeps work flowing when your primary provider has issues.
 
-> **Not every hat runs on every diff.** Only **4 hats are always-on** (Black, Blue, Purple, Gold). The remaining 14 activate when the diff matches their trigger conditions. A typical PR activates 4-8 hats.
+> **Not every hat runs on every diff.** Only **5 hats are always-on** (Black, Blue, Purple, Coral, Gold). The remaining 21 activate when the diff matches their trigger conditions. A typical PR activates 5-9 hats.
 
 ---
 
@@ -186,16 +186,18 @@ Cloud models (Tier 1-4) include: glm-5.1, kimi-k2.5, deepseek-v3.2, devstral-2, 
 
 ## Gremlin Overnight Daemon
 
-The Gremlin system is Hat Stack's autonomous overnight code scanner. It runs a 4-phase review loop across all your configured repos and produces a morning Herald digest.
+The Gremlin system is Hat Stack's autonomous overnight code scanner. It runs a 6-phase review loop across all your configured repos and produces a morning Herald digest.
 
-### The 4 Phases
+### The 6 Phases
 
 | Phase | Time | Hat | What |
 |-------|------|-----|------|
+| Catalog | 1 AM | Cyan | Crawl _universal_skills/ SKILL.md files, build searchable taxonomy |
 | Review | 2 AM | Black | Scan recent git diffs for security issues |
 | Propose | 3 AM | Gold | Synthesize findings into governance proposals |
 | Analyze | 4 AM | Purple | Deep analysis of approved proposals |
 | Herald | 5 AM | Blue | Compose cross-repo daily digest |
+| Experiment | 6 AM | Green | Co-design candidate agents using skills taxonomy + idle budget |
 
 ### Multi-Repo Configuration
 
@@ -237,10 +239,12 @@ The cron schedule is in `hat_configs.yml`:
 ```yaml
 gremlins:
   overnight_schedule:
-    review:  "0 2 * * *"     # 2 AM daily
-    propose: "0 3 * * *"     # 3 AM daily
-    analyze: "0 4 * * *"     # 4 AM daily
-    herald:  "0 5 * * *"     # 5 AM daily
+    catalog:    "0 1 * * *"     # 1 AM — Skills taxonomy crawl
+    review:     "0 2 * * *"     # 2 AM daily
+    propose:    "0 3 * * *"     # 3 AM daily
+    analyze:    "0 4 * * *"     # 4 AM daily
+    herald:     "0 5 * * *"     # 5 AM daily
+    experiment: "0 6 * * *"     # 6 AM — Agent co-design
 ```
 
 Supports standard 5-field cron syntax: `*`, ranges (`1-5`), steps (`*/15`), comma lists (`1,15,30`).
@@ -283,6 +287,34 @@ pwsh scripts/install-gremlin-daemon.ps1 -Uninstall
 3. Per-repo proposals in `.gremlins/repos/<name>/proposals/` -- approve or reject
 4. `python scripts/gremlin_runner.py --status` shows a summary across all repos
 5. The Herald digest is pushed to the OpenClaw bridge automatically
+
+### Skills Configuration
+
+The catalog phase crawls skill directories to build a searchable taxonomy. By default, Hat Stack looks for skills in `./skills` (relative to the project root). Set up the link:
+
+```bash
+# Option 1: Directory junction (Windows, no admin required)
+powershell -Command "New-Item -ItemType Junction -Path skills -Target /path/to/_universal_skills"
+
+# Option 2: Symlink (macOS/Linux)
+ln -s /path/to/_universal_skills skills
+
+# Option 3: Set environment variable
+export HAT_STACK_SKILLS_DIR=/path/to/_universal_skills
+```
+
+The resolution order for skills directory:
+1. `gremlins.experiment.skills_dir` in `hat_configs.yml` (supports relative paths)
+2. `HAT_STACK_SKILLS_DIR` environment variable
+3. `./skills` symlink/junction in the project root
+4. `../_universal_skills` sibling directory (fallback)
+
+The default config uses `./skills`:
+```yaml
+gremlins:
+  experiment:
+    skills_dir: "./skills"    # Relative to hat_stack root
+```
 
 ### Governance
 
@@ -383,7 +415,7 @@ python scripts/hats_task_runner.py --task analyze \
 
 ---
 
-## The 18 Hats
+## The 26 Hats
 
 | # | Hat | Run Mode | Focus |
 |---|-----|----------|-------|
@@ -405,6 +437,14 @@ python scripts/hats_task_runner.py --task analyze \
 | 16 | Steel | Conditional | Supply Chain & Dependencies |
 | 17 | Chartreuse | Conditional | Testing & Evaluation |
 | 18 | Gold | **Always (Last)** | CoVE Final QA |
+| 19 | Coral | **Always** | Product & User Value |
+| 20 | Maroon | Conditional | Compliance & Regulation |
+| 21 | Amber | Conditional | Documentation Quality |
+| 22 | Rose | Conditional | Performance Engineering |
+| 23 | Sage | Conditional | Data Engineering |
+| 24 | Lavender | Conditional | UX Research |
+| 25 | Crimson | Conditional | Cost & Economics |
+| 26 | Plum | Conditional | Integration Testing |
 
 Full specifications: [`CATALOG.md`](CATALOG.md) · Individual hat docs: [`hats/`](hats/)
 
@@ -488,6 +528,7 @@ Hat Stack also runs as GitHub Actions for CI/CD integration. This uses cloud mod
 | `DEEPINFRA_API_KEY` | deepinfra | For DeepInfra | DeepInfra API key |
 | `GROQ_API_KEY` | groq | For Groq | Groq API key |
 | `TOGETHER_API_KEY` | together | For Together AI | Together AI API key |
+| `HAT_STACK_SKILLS_DIR` | skills | No | Override path to skills directory (catalog phase) |
 
 ---
 
@@ -496,7 +537,7 @@ Hat Stack also runs as GitHub Actions for CI/CD integration. This uses cloud mod
 ```
 Layer 5: CLI / MCP Server / IDE Extension / CI/CD Trigger / Gremlin Daemon
 Layer 4: Conductor -- Hat Selector, Gate Engine, Retry, State Manager, Consolidator, CoVE
-Layer 3: 18 Hat Agents -- each with dedicated persona + model
+Layer 3: 26 Hat Agents -- each with dedicated persona + model
 Layer 2: Provider Router -- Ollama / OpenRouter / DeepInfra / Groq / Together AI / ...
 Layer 1: Ollama (Local + Cloud) / OpenAI-Compatible APIs / Vector Stores / Key-Value Stores
 ```
@@ -532,6 +573,8 @@ hat_stack/
     gremlin_runner.py         Multi-repo overnight Gremlin phase executor
     gremlin_daemon.py         Self-scheduling daemon with cron parser
     gremlin_memory.py         .gremlins/ directory management (per-repo storage)
+    skills_crawler.py         Skills taxonomy builder (_universal_skills/ crawler)
+    experiment_graph.py       Agent co-design state machine (BUILD→EVAL→SAFETY→PUBLISH→REPORT)
     herald_bridge.py          Push Herald digests to external channels
     hat_configs.yml           Model pool, providers, and hat configuration
     install-gremlin-daemon.ps1  Windows Scheduled Task installer

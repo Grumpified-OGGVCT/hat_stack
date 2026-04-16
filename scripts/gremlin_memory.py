@@ -144,9 +144,12 @@ def _ensure_global_dirs(gremlins_dir: Path):
         }
         (gremlins_dir / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
 
-    # Ensure repos/ and herald/ directories exist
+    # Ensure repos/, herald/, and experiments/ directories exist
     (gremlins_dir / "repos").mkdir(exist_ok=True)
     (gremlins_dir / "herald" / "social_log").mkdir(parents=True, exist_ok=True)
+    (gremlins_dir / "experiments" / "candidates").mkdir(parents=True, exist_ok=True)
+    (gremlins_dir / "experiments" / "published").mkdir(parents=True, exist_ok=True)
+    (gremlins_dir / "experiments" / "results").mkdir(parents=True, exist_ok=True)
 
 
 def list_repos(gremlins_root: str | Path) -> list[dict]:
@@ -617,6 +620,69 @@ def list_proposals_all_repos(gremlins_root: str | Path, status: str | None = Non
             proposal["repo"] = repo_name
         all_proposals.extend(proposals)
     return all_proposals
+
+
+# ---------------------------------------------------------------------------
+# Experiment state helpers
+# ---------------------------------------------------------------------------
+
+def init_experiment_state(gremlins_root: str | Path) -> dict:
+    """Initialize experiment state directory and return initial state.
+
+    Creates .gremlins/experiments/ with candidates/, published/, and results/ subdirs.
+    """
+    root = Path(gremlins_root)
+    experiments_dir = root / "experiments"
+
+    for subdir in ["candidates", "published", "results"]:
+        (experiments_dir / subdir).mkdir(parents=True, exist_ok=True)
+
+    state = {
+        "last_run": None,
+        "total_runs": 0,
+        "total_published": 0,
+        "total_rejected": 0,
+    }
+    state_path = experiments_dir / "experiment_state.json"
+    if not state_path.exists():
+        state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    return state
+
+
+def load_experiment_state(gremlins_root: str | Path) -> dict:
+    """Load experiment state from .gremlins/experiments/experiment_state.json."""
+    root = Path(gremlins_root)
+    state_path = root / "experiments" / "experiment_state.json"
+    if state_path.exists():
+        try:
+            return json.loads(state_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            pass
+    return init_experiment_state(gremlins_root)
+
+
+def save_experiment_state(gremlins_root: str | Path, state: dict):
+    """Save experiment state to .gremlins/experiments/experiment_state.json."""
+    root = Path(gremlins_root)
+    state_path = root / "experiments" / "experiment_state.json"
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+
+
+def write_experiment_result(gremlins_root: str | Path, result: dict) -> Path:
+    """Write an experiment result to .gremlins/experiments/results/.
+
+    Returns:
+        Path to the written result file.
+    """
+    root = Path(gremlins_root)
+    results_dir = root / "experiments" / "results"
+    results_dir.mkdir(parents=True, exist_ok=True)
+
+    timestamp = time.strftime("%Y-%m-%d", time.gmtime())
+    result_path = results_dir / f"{timestamp}-experiment.json"
+    result_path.write_text(json.dumps(result, indent=2), encoding="utf-8")
+    return result_path
 
 
 # ---------------------------------------------------------------------------

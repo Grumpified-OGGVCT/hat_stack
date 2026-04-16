@@ -51,6 +51,8 @@ from gremlin_runner import (
     phase_propose,
     phase_analyze,
     phase_herald,
+    phase_catalog,
+    phase_experiment,
     show_status,
     _get_configured_repos,
     _repo_name_from_path,
@@ -257,8 +259,9 @@ def build_schedule(config: dict) -> dict[str, CronExpression]:
 
     if schedule_cfg is None or (isinstance(schedule_cfg, dict) and len(schedule_cfg) == 0):
         # Default schedule when none configured
-        defaults = {"review": "0 2 * * *", "propose": "0 3 * * *",
-                    "analyze": "0 4 * * *", "herald": "0 5 * * *"}
+        defaults = {"catalog": "0 1 * * *", "review": "0 2 * * *",
+                    "propose": "0 3 * * *", "analyze": "0 4 * * *",
+                    "herald": "0 5 * * *", "experiment": "0 6 * * *"}
         for phase, cron_str in defaults.items():
             schedule[phase] = CronExpression(cron_str)
     elif isinstance(schedule_cfg, dict):
@@ -286,8 +289,9 @@ def build_schedule(config: dict) -> dict[str, CronExpression]:
                 schedule[phase] = CronExpression(default_crons[i] if i < len(default_crons) else "0 0 * * *")
     # Fallback: if nothing was set, use defaults
     if not schedule:
-        defaults = {"review": "0 2 * * *", "propose": "0 3 * * *",
-                    "analyze": "0 4 * * *", "herald": "0 5 * * *"}
+        defaults = {"catalog": "0 1 * * *", "review": "0 2 * * *",
+                    "propose": "0 3 * * *", "analyze": "0 4 * * *",
+                    "herald": "0 5 * * *", "experiment": "0 6 * * *"}
         for phase, cron_str in defaults.items():
             schedule[phase] = CronExpression(cron_str)
 
@@ -301,12 +305,14 @@ def build_schedule(config: dict) -> dict[str, CronExpression]:
 class GremlinDaemon:
     """Self-scheduling daemon that drives the multi-repo Gremlin system."""
 
-    PHASE_ORDER = ["review", "propose", "analyze", "herald"]
+    PHASE_ORDER = ["catalog", "review", "propose", "analyze", "herald", "experiment"]
     PHASE_FUNCTIONS = {
+        "catalog": phase_catalog,
         "review": phase_review,
         "propose": phase_propose,
         "analyze": phase_analyze,
         "herald": phase_herald,
+        "experiment": phase_experiment,
     }
 
     def __init__(self, config_path: str, gremlins_path: str | None = None):
@@ -368,7 +374,11 @@ class GremlinDaemon:
 
         self._log(f"Starting phase: {phase.upper()}")
         try:
-            result = phase_fn(self.config, self.gremlins_root)
+            # Catalog and experiment phases accept `since` parameter
+            if phase in ("catalog", "experiment"):
+                result = phase_fn(self.config, self.gremlins_root, since="24 hours ago")
+            else:
+                result = phase_fn(self.config, self.gremlins_root)
             self._last_run[phase] = datetime.datetime.now()
 
             status = result.get("status", "unknown")

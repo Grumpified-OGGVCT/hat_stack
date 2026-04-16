@@ -711,6 +711,223 @@ hats:
       the composite risk score, and issue the final merge verdict:
       ALLOW (score ≤ 20), ESCALATE (21–60), or QUARANTINE (> 60 or any CRITICAL).
 
+  # ---------------------------------------------------------------------------
+  # 8 New Hats (19–26) — Production dev stack coverage
+  # Adding hat 27+ requires only: spec file + config entry + selector keywords.
+  # No code changes for conditional hats. Always-on hats need a code change
+  # in hat_selector.py (add to the always_run list).
+  # ---------------------------------------------------------------------------
+
+  coral:
+    name: "Coral Hat — Product & User Value"
+    emoji: "🪸"
+    number: 19
+    always_run: true
+    primary_model: "glm-5.1:cloud"
+    fallback_model: "minimax-m2.7:cloud"
+    local_model: "qwen3.5:9b"
+    local_only: false
+    temperature: 0.3
+    max_tokens: 4096
+    timeout_seconds: 120
+    triggers: []  # Always runs
+    persona: |
+      You are CoralHat, a product and user value advocate. You evaluate every
+      change through the user's eyes: does this deliver value? Is the feature
+      complete? Does it break existing workflows? You find the gap between
+      what code does and what users need.
+
+  maroon:
+    name: "Maroon Hat — Compliance & Regulation"
+    emoji: "🏴"
+    number: 20
+    always_run: false
+    primary_model: "glm-5.1:cloud"
+    fallback_model: "kimi-k2.5:cloud"
+    local_model: "qwen3.5:9b"
+    local_only: false
+    temperature: 0.2
+    max_tokens: 4096
+    timeout_seconds: 120
+    triggers:
+      - "soc2"
+      - "hipaa"
+      - "gdpr"
+      - "audit"
+      - "compliance"
+      - "policy"
+      - "pci-dss"
+      - "regulation"
+      - "consent"
+      - "retention"
+    persona: |
+      You are MaroonHat, a compliance and regulatory specialist. You map code
+      changes to applicable regulations, verify audit trail integrity, check
+      consent flows, and enforce data retention policies. You find the
+      regulation the developer didn't know applied to their code.
+
+  amber:
+    name: "Amber Hat — Documentation Quality"
+    emoji: "🟨"
+    number: 21
+    always_run: false
+    primary_model: "deepseek-v3.2:cloud"
+    fallback_model: "glm-5.1:cloud"
+    local_model: "gemma3:12b"
+    temperature: 0.2
+    max_tokens: 4096
+    timeout_seconds: 90
+    triggers:
+      - "readme"
+      - "docs"
+      - "changelog"
+      - "docstring"
+    persona: |
+      You are AmberHat, a documentation quality specialist. You verify that
+      documentation is accurate, complete, and up-to-date. You find the
+      paragraph that used to be true and the API endpoint that was never
+      documented.
+
+  rose:
+    name: "Rose Hat — Performance Engineering"
+    emoji: "🌹"
+    number: 22
+    always_run: false
+    primary_model: "devstral-2:123b-cloud"
+    fallback_model: "deepseek-v3.2:cloud"
+    local_model: "qwen3.5:9b"
+    temperature: 0.2
+    max_tokens: 4096
+    timeout_seconds: 120
+    triggers:
+      - "benchmark"
+      - "load-test"
+      - "perf"
+      - "latency"
+      - "throughput"
+      - "cache"
+      - "optimization"
+      - "profile"
+      - "p99"
+    persona: |
+      You are RoseHat, a performance engineering specialist. You evaluate
+      latency budgets, throughput impact, cache effectiveness, and scalability.
+      You find the p99 that everyone else ignored.
+
+  sage:
+    name: "Sage Hat — Data Engineering"
+    emoji: "🧿"
+    number: 23
+    always_run: false
+    primary_model: "devstral-2:123b-cloud"
+    fallback_model: "qwen3-coder:480b-cloud"
+    local_model: "qwen3.5:9b"
+    temperature: 0.2
+    max_tokens: 4096
+    timeout_seconds: 120
+    triggers:
+      - "migration"
+      - "schema"
+      - "etl"
+      - "pipeline"
+      - "sql"
+      - "database"
+      - "warehouse"
+      - "seed"
+      - "prisma"
+      - "table"
+      - "column"
+      - "index"
+    persona: |
+      You are SageHat, a data engineering specialist. You review schema
+      correctness, migration safety, data integrity constraints, and ETL
+      pipeline correctness. You find the migration that works on empty
+      tables but fails on 10M rows.
+
+  lavender:
+    name: "Lavender Hat — UX Research"
+    emoji: "💜"
+    number: 24
+    always_run: false
+    primary_model: "kimi-k2.5:cloud"
+    fallback_model: "glm-5.1:cloud"
+    local_model: "gemma3:12b"
+    temperature: 0.3
+    max_tokens: 4096
+    timeout_seconds: 120
+    triggers:
+      - "component"
+      - "ux"
+      - "layout"
+      - "style"
+      - "responsive"
+      - "animation"
+      - "design-system"
+    persona: |
+      You are LavenderHat, a UX research and design quality specialist. You
+      evaluate design system coherence, interaction design, responsive
+      behavior, and visual consistency. You find the interaction that works
+      in the happy path but breaks on every error state.
+
+  crimson:
+    name: "Crimson Hat — Cost & Economics"
+    emoji: "❤️‍🔥"
+    number: 25
+    always_run: false
+    primary_model: "glm-5.1:cloud"
+    fallback_model: "kimi-k2.5:cloud"
+    local_model: "qwen3.5:9b"
+    temperature: 0.2
+    max_tokens: 4096
+    timeout_seconds: 90
+    triggers:
+      - "pricing"
+      - "billing"
+      - "cost"
+      - "budget"
+      - "subscription"
+      - "invoice"
+      - "meter"
+      - "usage"
+      - "rate"
+      - "quota"
+      - "stripe"
+      - "payment"
+    persona: |
+      You are CrimsonHat, a cost and economics specialist. You verify billing
+      correctness, analyze cost impact, check metering accuracy, and assess
+      financial risk. You find the pricing bug that costs $0.01 per request
+      but runs 10M times per day.
+
+  plum:
+    name: "Plum Hat — Integration Testing"
+    emoji: "🫐"
+    number: 26
+    always_run: false
+    primary_model: "qwen3-coder:480b-cloud"
+    fallback_model: "devstral-2:123b-cloud"
+    local_model: "qwen3.5:9b"
+    temperature: 0.3
+    max_tokens: 4096
+    timeout_seconds: 120
+    triggers:
+      - "api"
+      - "endpoint"
+      - "contract"
+      - "swagger"
+      - "openapi"
+      - "integration"
+      - "e2e"
+      - "service"
+      - "wire"
+      - "mock-server"
+      - "fixture"
+    persona: |
+      You are PlumHat, an integration testing specialist. You verify API
+      contract compliance, service boundary correctness, and end-to-end
+      flow validation. You find the contract mismatch that only appears
+      when the provider adds a new optional field.
+
 # Gate configuration per SPEC.md §7
 gates:
   cost_budget:
@@ -788,16 +1005,20 @@ gremlins:
   # Schedule — daemon triggers each phase at its cron time.
   # Old format (list) still works with DeprecationWarning.
   overnight_schedule:
-    review:  "0 2 * * *"     # 2 AM — Review queue (Black Hat)
-    propose: "0 3 * * *"     # 3 AM — Proposals (Gold Hat)
-    analyze: "0 4 * * *"     # 4 AM — Deep analysis (Purple Hat)
-    herald:  "0 5 * * *"     # 5 AM — Herald digest (Blue Hat)
+    catalog:    "0 1 * * *"     # 1 AM — Skills taxonomy crawl (Cyan Hat)
+    review:     "0 2 * * *"     # 2 AM — Review queue (Black Hat)
+    propose:    "0 3 * * *"     # 3 AM — Proposals (Gold Hat)
+    analyze:    "0 4 * * *"     # 4 AM — Deep analysis (Purple Hat)
+    herald:     "0 5 * * *"     # 5 AM — Herald digest (Blue Hat)
+    experiment: "0 6 * * *"     # 6 AM — Agent co-design (Green Hat)
   # Map gremlin phases to hats (hat provides persona, model chain, fallback)
   phase_to_hat:
-    review: "black"      # Black Hat — security & exploit scanning
-    propose: "gold"      # Gold Hat — CoVE synthesis & proposals
-    analyze: "purple"     # Purple Hat — deep analysis (dynamic override per proposal)
-    herald: "blue"       # Blue Hat — process & digest formatting
+    catalog: "cyan"         # Cyan Hat — Innovation/taxonomy discovery
+    review: "black"          # Black Hat — security & exploit scanning
+    propose: "gold"          # Gold Hat — CoVE synthesis & proposals
+    analyze: "purple"        # Purple Hat — deep analysis (dynamic override per proposal)
+    herald: "blue"           # Blue Hat — process & digest formatting
+    experiment: "green"      # Green Hat — Evolution/building new agents
   # Overnight mode — larger local models, extended timeouts
   overnight:
     enabled: true
@@ -824,3 +1045,27 @@ gremlins:
   herald:
     channels: ["social_log"]    # Future: telegram, discord, etc.
     max_daily_posts: 3
+
+  # Experiment phase — agent co-design using idle budget
+  # Uses skills taxonomy as the design space for candidate agents.
+  # No experiment/catalog in config? Defaults to experiment:enabled=false, catalog:enabled=true.
+  experiment:
+    enabled: true
+    min_budget: 0.30          # Minimum remaining budget to start experiment
+    max_candidates: 3         # Top candidates to publish
+    min_score: 0.30           # Minimum score to publish a candidate
+    max_retries: 2            # Retry BUILD→EVAL if all candidates score below min_score
+    sandbox_timeout: 120      # Seconds per candidate evaluation
+    skills_dir: "./skills"    # Relative to hat_stack root; symlink or copy _universal_skills/ here
+    design_space:
+      prompt_styles: ["imperative", "chain_of_thought", "few_shot"]
+      tool_sets: []           # Populated from skills_taxonomy.json
+      goals: []               # Populated from skills_taxonomy.json
+      output_formats: ["markdown", "json_structured"]
+    deny_list:                 # Patterns forbidden in generated agent code
+      - "os.system"
+      - "subprocess.*shell=True"
+      - "requests\\."
+      - "socket\\."
+      - "__import__"
+    max_experiment_budget: 0.10  # Max USD to spend on experiment phase

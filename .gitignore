@@ -35,6 +35,11 @@ hats_report*
 .gremlins/
 .moltbook/
 
+# Skills directory — symlink/junction to _universal_skills (not part of the repo)
+# Set up: powershell -Command "New-Item -ItemType Junction -Path skills -Target <path-to-_universal_skills>"
+# Or set HAT_STACK_SKILLS_DIR env var to the absolute path
+skills/
+
 # MCP server build output
 mcp/dist/
 

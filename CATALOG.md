@@ -53,8 +53,16 @@ The Hats Team is built on eight core tenets:
 | 16 | 🔗 | [Steel Hat — Supply Chain & Dependencies](hats/16_steel_hat.md) | Conditional | Dependency changes, lockfile updates, new package additions | SBOM generation, vulnerability scanning, license compliance |
 | 17 | 🧪 | [Chartreuse Hat — Testing & Evaluation](hats/17_chartreuse_hat.md) | Conditional | Test additions/changes, evaluation pipelines, benchmark updates | Test coverage, RAGAS metrics, prompt evaluation, regression detection |
 | 18 | ✨ | [Gold Hat — CoVE (Convergent Verification & Expert) — Final QA](hats/18_gold_hat.md) | **Always (Last)** | After all other hats complete | 14-dimension adversarial QA, merge-ready decision, severity adjudication |
+| 19 | 🪸 | [Coral Hat — Product & User Value](hats/19_coral_hat.md) | **Always** | All diffs — every change has user impact | User journey coherence, feature completeness, value-to-complexity ratio |
+| 20 | 🏴 | [Maroon Hat — Compliance & Regulation](hats/20_maroon_hat.md) | Conditional | soc2, hipaa, gdpr, audit, compliance, policy, pci-dss | Regulatory compliance, audit readiness, consent flows, retention policy |
+| 21 | 🟨 | [Amber Hat — Documentation Quality](hats/21_amber_hat.md) | Conditional | .md, .rst, .adoc, readme, docs, changelog | Documentation accuracy, completeness, freshness, accessibility |
+| 22 | 🌹 | [Rose Hat — Performance Engineering](hats/22_rose_hat.md) | Conditional | benchmark, load-test, perf, latency, throughput, cache, p99 | Latency budgets, throughput analysis, cache effectiveness, scalability |
+| 23 | 🧿 | [Sage Hat — Data Engineering](hats/23_sage_hat.md) | Conditional | migration, schema, etl, pipeline, sql, database, prisma | Schema correctness, migration safety, data integrity, ETL correctness |
+| 24 | 💜 | [Lavender Hat — UX Research](hats/24_lavender_hat.md) | Conditional | .css, .scss, component, ui, ux, layout, style, responsive | Design system coherence, interaction quality, responsive behavior |
+| 25 | ❤️‍🔥 | [Crimson Hat — Cost & Economics](hats/25_crimson_hat.md) | Conditional | pricing, billing, cost, budget, subscription, invoice, meter | Billing correctness, cost impact, metering accuracy, financial risk |
+| 26 | 🫐 | [Plum Hat — Integration Testing](hats/26_plum_hat.md) | Conditional | api, endpoint, contract, swagger, openapi, integration, e2e | API contract compliance, service boundary testing, E2E flow validation |
 
-> **Always hats** (⚫ #2, 🔵 #6, 🟪 #9, ✨ #18) run on every PR. All other hats are **Conditional** and activate based on their trigger conditions.
+> **Always hats** (⚫ #2, 🔵 #6, 🟪 #9, 🪸 #19, ✨ #18) run on every PR. All other hats are **Conditional** and activate based on their trigger conditions.
 
 ---
 

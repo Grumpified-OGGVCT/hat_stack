@@ -29,6 +29,7 @@ import {
   listModels,
   getConfig,
   assembleTeam,
+  recommendSkills,
   runGremlinKickoff,
   handleGremlinProposal,
   readGremlinHerald,
@@ -151,6 +152,24 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
 
         const result = await assembleTeam(taskDescription, maxCloud, maxLocal, priority, context);
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        };
+      }
+
+      case "hats_skill_recommend": {
+        const taskDesc = args?.task_description as string;
+        const maxResults = (args?.max_results as number) || 5;
+        const categories = args?.categories as string[] | undefined;
+
+        if (!taskDesc) {
+          return {
+            content: [{ type: "text", text: "Error: 'task_description' parameter is required" }],
+            isError: true,
+          };
+        }
+
+        const result = await recommendSkills(taskDesc, maxResults, categories);
         return {
           content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
         };
