@@ -150,7 +150,7 @@ def _repo_name_from_path(repo_path: str) -> str:
 # Phase 1: Review Queue (Black Hat) -- multi-repo
 # ---------------------------------------------------------------------------
 
-def phase_review(config: dict, gremlins_root: Path) -> dict:
+def phase_review(config: dict, gremlins_root: Path, since: str = "24 hours ago") -> dict:
     """Black Hat scans recent git diffs for each configured repo."""
     hat_id = _resolve_phase_hat(config, "review")
     hat_def = _get_hat_config(config, hat_id)
@@ -174,10 +174,11 @@ def phase_review(config: dict, gremlins_root: Path) -> dict:
         # Initialize per-repo memory
         repo_dir = init_gremlin_memory(gremlins_root.parent, repo_name=repo_name)
 
-        # Get recent diffs (last 24h) from THIS repo
+        # Get recent diffs from THIS repo
+        since_arg = since if since != "all" else "1970-01-01"
         try:
             result = subprocess.run(
-                ["git", "log", "--since=24 hours ago", "--oneline"],
+                ["git", "log", f"--since={since_arg}", "--oneline"],
                 capture_output=True, text=True, timeout=10,
                 cwd=repo_path,
             )
@@ -703,6 +704,10 @@ def main():
         "--overnight", action="store_true",
         help="Force overnight mode (for testing)"
     )
+    parser.add_argument(
+        "--since", default="24 hours ago",
+        help="Git log time window (default: '24 hours ago'). Use '1 week ago' or 'all' for testing."
+    )
 
     args = parser.parse_args()
 
@@ -799,11 +804,15 @@ def main():
         order = [args.phase]
 
     results = []
+    since = args.since
     for phase_name in order:
         hat_id = _resolve_phase_hat(config, phase_name)
         print(f"\nGremlin Phase: {phase_name.upper()} ({hat_id} hat)", file=sys.stderr)
         phase_fn = phases[phase_name]
-        result = phase_fn(config, gremlins_root)
+        if phase_name == "review":
+            result = phase_fn(config, gremlins_root, since=since)
+        else:
+            result = phase_fn(config, gremlins_root)
         results.append(result)
         status = result.get("status", "unknown")
         summary = result.get("summary", result.get("reason", ""))
