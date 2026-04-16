@@ -12,6 +12,7 @@ on:
 permissions:
   contents: read
   pull-requests: write
+  issues: write
 
 jobs:
   self-review:
@@ -41,6 +42,7 @@ jobs:
 
       - name: Run Hats Pipeline
         id: hats
+        continue-on-error: true
         env:
           OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
           OLLAMA_CLOUD_URL: ${{ secrets.OLLAMA_CLOUD_URL || 'https://ollama.com' }}
