@@ -190,13 +190,34 @@ def phase_review(config: dict, gremlins_root: Path, since: str = "24 hours ago")
             repo_results.append({"repo": repo_name, "status": "skipped", "reason": "No commits in last 24h"})
             continue
 
-        # Get the diff for recent changes
+        # Get the diff for recent changes — dynamically determine diff range
         try:
-            result = subprocess.run(
-                ["git", "diff", "HEAD~5..HEAD"],
+            # Count total commits to pick a valid base
+            count_result = subprocess.run(
+                ["git", "rev-list", "--count", "HEAD"],
                 capture_output=True, text=True, timeout=10,
                 cwd=repo_path,
             )
+            total_commits = int(count_result.stdout.strip()) if count_result.returncode == 0 else 0
+        except (subprocess.TimeoutExpired, FileNotFoundError, ValueError):
+            total_commits = 0
+
+        try:
+            if total_commits <= 1:
+                # Only one commit — diff against empty tree
+                result = subprocess.run(
+                    ["git", "diff", "--root", "HEAD"],
+                    capture_output=True, text=True, timeout=10,
+                    cwd=repo_path,
+                )
+            else:
+                # Use up to 5 commits back, but never beyond the first commit
+                depth = min(5, total_commits - 1)
+                result = subprocess.run(
+                    ["git", "diff", f"HEAD~{depth}..HEAD"],
+                    capture_output=True, text=True, timeout=10,
+                    cwd=repo_path,
+                )
             recent_diff = result.stdout.strip()[:8000]
         except (subprocess.TimeoutExpired, FileNotFoundError):
             recent_diff = ""
