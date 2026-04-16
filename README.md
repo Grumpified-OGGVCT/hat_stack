@@ -70,7 +70,7 @@ Hat Stack uses these local Ollama models by default (no cloud needed):
 | `gemma4:e4b` | 9.6GB | 4.5B | Security analysis: Black, Purple (local mode) |
 | `qwen3.5:9b` | 6.1GB | 9B | Deep reasoning: Red, Brown (local mode) |
 
-Pull all three for full local coverage:
+**You only need one model to start.** `gemma4:e2b` (7.2GB) covers the 4 always-on hats and most conditional ones. The other two add deeper analysis for security and data governance hats. Pull all three for full local coverage:
 
 ```bash
 ollama pull gemma4:e2b gemma4:e4b qwen3.5:9b
@@ -259,7 +259,7 @@ pwsh scripts/install-gremlin-daemon.ps1 -Uninstall
 
 ### Governance
 
-Proposals follow a governance lifecycle:
+All proposals require human approval by default (`governance.require_human_approval: true`). Proposals follow a governance lifecycle:
 - **PENDING_HUMAN** -- Created by Gremlins, awaiting your approval
 - **APPROVED** -- You approved it, analysis will run
 - **REJECTED** -- You rejected it, no further action
@@ -390,6 +390,27 @@ Full specifications: [`CATALOG.md`](CATALOG.md) · Individual hat docs: [`hats/`
 | **ALLOW** | Safe to merge | No CRITICAL findings; risk score <= 20 |
 | **ESCALATE** | Requires human review | HIGH findings; risk score 21-60 |
 | **QUARANTINE** | Cannot merge pending adjudication | CRITICAL finding; risk score > 60 |
+
+---
+
+## When to Use Hat Stack
+
+**Great fit:**
+
+| Scenario | Why it fits |
+|----------|-------------|
+| Security-first teams that cannot send code to external APIs | Local-only mode + dual-mode hats keep secrets in-house |
+| Mono-repo or multi-repo orgs wanting automated nightly governance | Gremlin daemon provides daily digests with human-gated proposals |
+| Teams already using Ollama | No extra cost -- just pull the models you need (7.2GB minimum) |
+| Hybrid cloud users who need fallback when a provider has outage | Multi-provider router with automatic tier fallback |
+
+**Less ideal:**
+
+| Scenario | Reason |
+|----------|--------|
+| Very small projects with cheap CI linters already in place | Hat Stack adds model download and per-hat inference time |
+| Real-time PR feedback on massive PRs (hundreds of files) | Per-hat timeouts are 60-300s; consider splitting large PRs or raising `timeout_multiplier` |
+| Repos with no diff semantics (binary assets, images) | Conditional hats won't activate on binary files; only the 4 always-on hats run |
 
 ---
 
