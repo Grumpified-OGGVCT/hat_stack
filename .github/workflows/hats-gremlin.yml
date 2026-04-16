@@ -10,6 +10,9 @@ on:
         required: false
         default: 'all'
 
+permissions:
+  contents: read
+
 jobs:
   gremlin-review:
     runs-on: ubuntu-latest

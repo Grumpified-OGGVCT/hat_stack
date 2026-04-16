@@ -76,6 +76,9 @@ on:
         description: "OpenRouter API key for cross-provider fallback."
         required: false
 
+permissions:
+  contents: read
+
 jobs:
   hats-review:
     name: "🎩 Run Hats Pipeline"

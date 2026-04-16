@@ -793,23 +793,21 @@ def preflight_check(config: dict | None = None, requested_hats: list[str] | None
     if local_only_cfg.get("enabled", False):
         issues.append("INFO: Local-only mode is ENABLED. Cloud models will not be used.")
 
-    # Check all configured providers
+    # Check all configured providers (boolean check only — never log key values)
     providers_cfg = config.get("providers", {}) if config else {}
     for provider_name, provider_cfg in providers_cfg.items():
         if not provider_cfg.get("enabled", True):
             continue
         api_key_env = provider_cfg.get("api_key_env", "")
-        if api_key_env:
-            api_key = os.environ.get(api_key_env, "").strip()
-            if not api_key:
-                issues.append(
-                    f"WARNING: {api_key_env} is not set. "
-                    f"Models using provider '{provider_name}' will fail."
-                )
+        if api_key_env and not os.environ.get(api_key_env, "").strip():
+            issues.append(
+                f"WARNING: {api_key_env} is not set. "
+                f"Models using provider '{provider_name}' will fail."
+            )
 
     # Legacy check: if no providers section, check OLLAMA_API_KEY
     if not providers_cfg:
-        api_key = os.environ.get("OLLAMA_API_KEY", "").strip()
+        has_ollama_key = bool(os.environ.get("OLLAMA_API_KEY", "").strip())
         # Determine which hats will actually run
         hats_cfg = config.get("hats", {}) if config else {}
         if requested_hats:
@@ -818,7 +816,7 @@ def preflight_check(config: dict | None = None, requested_hats: list[str] | None
             active_hats = hats_cfg
 
         needs_cloud = any(not h.get("local_only", False) for h in active_hats.values()) if active_hats else True
-        if not api_key and needs_cloud:
+        if not has_ollama_key and needs_cloud:
             issues.append(
                 "WARNING: OLLAMA_API_KEY is not set.\n"
                 "   Cloud models will fail and fall back to local models.\n"
