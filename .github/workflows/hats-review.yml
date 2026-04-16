@@ -91,7 +91,7 @@ jobs:
 
     steps:
       - name: Checkout hat_stack
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ github.repository }}
           path: hat_stack
