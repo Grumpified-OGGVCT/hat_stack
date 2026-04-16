@@ -845,17 +845,39 @@ def preflight_check(config: dict | None = None, requested_hats: list[str] | None
 
     needs_local = any(models_cfg.get(m, {}).get("local", False) for m in active_models if m) if models_cfg else False
 
+    # Check if any cloud provider has API keys (for CI/cloud-only mode)
+    has_cloud_key = False
+    if providers_cfg:
+        for provider_name, provider_cfg in providers_cfg.items():
+            api_key_env = provider_cfg.get("api_key_env", "")
+            if api_key_env and os.environ.get(api_key_env, "").strip():
+                has_cloud_key = True
+                break
+    else:
+        # Legacy: check OLLAMA_API_KEY
+        if os.environ.get("OLLAMA_API_KEY", "").strip():
+            has_cloud_key = True
+
     if needs_local:
         local_url = os.environ.get("OLLAMA_LOCAL_URL", "http://localhost:11434")
         try:
             resp = requests.get(f"{local_url}/api/version", timeout=3)
             if resp.status_code != 200:
-                issues.append(f"Local Ollama at {local_url} returned status {resp.status_code}")
+                issues.append(f"WARNING: Local Ollama at {local_url} returned status {resp.status_code}")
         except requests.exceptions.RequestException:
-            issues.append(
-                f"Local Ollama server not reachable at {local_url}.\n"
-                "   Start it with: ollama serve"
-            )
+            if has_cloud_key:
+                # CI/cloud-only mode: local Ollama unavailable but cloud works
+                issues.append(
+                    f"INFO: Local Ollama not reachable at {local_url}. "
+                    f"Cloud models will be used (local-only hats will fail)."
+                )
+            else:
+                # No cloud key either — truly fatal
+                issues.append(
+                    f"ERROR: Local Ollama server not reachable at {local_url}.\n"
+                    "   Start it with: ollama serve\n"
+                    "   Or set OLLAMA_API_KEY for cloud model support."
+                )
 
     cloud_url = os.environ.get("OLLAMA_CLOUD_URL", "").strip()
     if not cloud_url and not providers_cfg:

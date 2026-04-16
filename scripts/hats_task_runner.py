@@ -847,7 +847,7 @@ def main():
     # Preflight
     requested_hat_ids = [h.strip() for h in args.hats.split(",")] if args.hats else None
     issues = preflight_check(config, requested_hats=requested_hat_ids)
-    has_errors = any("not reachable" in msg.lower() for msg in issues)
+    has_errors = any(msg.upper().startswith("ERROR:") for msg in issues)
     for msg in issues:
         print(msg, file=sys.stderr)
     if has_errors:
