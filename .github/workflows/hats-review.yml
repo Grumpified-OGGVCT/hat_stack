@@ -106,7 +106,7 @@ jobs:
 
       - name: Download diff artifact
         if: inputs.diff_artifact != ''
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: ${{ inputs.diff_artifact }}
           path: /tmp/hats-artifact-diff
