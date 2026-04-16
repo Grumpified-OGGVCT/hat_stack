@@ -770,6 +770,7 @@ gremlins:
   # Each repo gets its own .gremlins/repos/<name>/ directory for findings.
   # Optional per-repo keys: skip_phases (list), enabled (bool, default true)
   repos:
+    - path: "C:/Users/gerry/generic_workspace/GrumpiMiner"
     - path: "C:/Users/gerry/generic_workspace/GrumpRolled"
     - path: "C:/Users/gerry/generic_workspace/hat_stack"
     - path: "C:/Users/gerry/generic_workspace/HLF_MCP"
